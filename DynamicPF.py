@@ -21,7 +21,7 @@ except ModuleNotFoundError:
     print("pyvista and pyvistaqt are required to visualize the solution")
     have_pyvista = False
 
-preset = Presets.pure_shear
+preset = Presets.high_loading_rate
 
 out_dir = Path(preset.output_directory)
 
@@ -132,7 +132,7 @@ displacement_a = dfx.fem.form(ufl.lhs(displacement_weak_form))
 displacement_L = dfx.fem.form(ufl.rhs(displacement_weak_form))
 
 
-P = (p + crack_phase_old) * 0.5
+P = 0.5 * (p + crack_phase_old)
 crack_phase_weak_form = (
     eta * (p - crack_phase_old) * q * ufl.dx
     - dt
@@ -293,7 +293,7 @@ if have_pyvista:
     plotter.app.processEvents()
 
     screenshot_dir = out_dir / "Screenshots"
-    if not os.path.exists(screenshot_dir):
+    if not screenshot_dir.exists():
         os.makedirs(screenshot_dir)
     plotter.screenshot(screenshot_dir / "initial.tiff")
 
