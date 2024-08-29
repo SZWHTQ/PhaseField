@@ -1,0 +1,8 @@
+Process Name, Elapsed Time(s)
+disp_solve, 262.00
+energy_history, 6.11
+crack_solve, 24.57
+verbose, 1.76
+plot, 34.81
+update, 1.30
+save, 22.13
