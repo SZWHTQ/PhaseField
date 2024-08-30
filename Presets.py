@@ -44,7 +44,7 @@ mat = Material()
 mat.lc = 0.5
 high_loading_rate = Preset(name, mat)
 high_loading_rate.output_directory = pathlib.Path("result") / name
-high_loading_rate.u_r = 0.4
+high_loading_rate.u_r = 0.2
 high_loading_rate.end_t = 4e-3
 high_loading_rate.num_iterations = 500
 
