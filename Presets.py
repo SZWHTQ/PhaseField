@@ -1,9 +1,23 @@
 import pathlib
 
 
+class Material:
+
+    def __init__(self):
+        # Mechanical properties
+        self.rho = 7e-6  # Mass Density
+        self.lame = 1.2e5  # Lamé coefficient
+        self.mu = 8e4  # Shear modulus
+
+        # Crack phase properties
+        self.Gc = 2.7  # Critical energy release rate
+        self.lc = 0.5  # Characteristic length
+        self.eta = 1e-3  # Crack phase viscosity parameter
+
+
 class Preset:
 
-    def __init__(self, name="Default"):
+    def __init__(self, name="Default", material=Material()):
         self.__name = name
 
         self.output_directory = pathlib.Path("result/Output")
@@ -13,6 +27,8 @@ class Preset:
         self.num_iterations = 200
         self.verbose = True
 
+        self.material = material
+
     def __str__(self):
         return self.__name
 
@@ -20,10 +36,12 @@ class Preset:
 default = Preset()
 
 name = "HighLoadingRate"
-high_loading_rate = Preset(name)
-high_loading_rate.output_directory = pathlib.Path("result") / name
+mat = Material()
+mat.lc = 0.5
+high_loading_rate = Preset(name, mat)
+high_loading_rate.output_directory = pathlib.Path("test") / name
 high_loading_rate.u_r = 0.2
-high_loading_rate.end_t = 4e-3
+high_loading_rate.end_t = 2e-3
 high_loading_rate.num_iterations = 500
 
 name = "LowLoadingRate"

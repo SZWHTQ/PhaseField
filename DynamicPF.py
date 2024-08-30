@@ -22,7 +22,7 @@ except ModuleNotFoundError:
     have_pyvista = False
 
 preset = Presets.high_loading_rate
-
+material = preset.material
 out_dir = Path(preset.output_directory)
 
 dfx.log.set_output_file(str(out_dir / "solve.log"))
@@ -65,34 +65,21 @@ crack_phase.name = "Crack Phase"
 energy_history.name = "Energy History"
 
 
-# %% Define material parameters
-# def getLame(E, nu):
-#     return E * nu / (1 + nu) / (1 - 2 * nu), E / 2 / (1 + nu)
-
-# Mechanical properties
-rho = 7e-6  # Mass Density
-lame = 1.2e5  # Lamé coefficient
-mu = 8e4  # Shear modulus
-
-# Crack phase properties
-Gc = 2.7  # Critical energy release rate
-lc = 0.5  # Characteristic length
-eta = 1e-3  # Crack phase viscosity parameter
-
-
 # %% Define constitutive relations
 def getStrain(u):
     return ufl.sym(ufl.grad(u))
 
 
 def getStress(u):
-    return 2.0 * mu * getStrain(u) + lame * ufl.tr(getStrain(u)) * ufl.Identity(len(u))
+    return 2.0 * material.mu * getStrain(u) + material.lame * ufl.tr(
+        getStrain(u)
+    ) * ufl.Identity(len(u))
 
 
 def getStrainEnergy(u):
-    return 0.5 * (lame + mu) * (
+    return 0.5 * (material.lame + material.mu) * (
         0.5 * (ufl.tr(getStrain(u)) + abs(ufl.tr(getStrain(u))))
-    ) ** 2 + mu * ufl.inner(ufl.dev(getStrain(u)), ufl.dev(getStrain(u)))
+    ) ** 2 + material.mu * ufl.inner(ufl.dev(getStrain(u)), ufl.dev(getStrain(u)))
 
 
 # strain_energy_expr = dfx.fem.Expression(
@@ -124,7 +111,7 @@ dt_old = dfx.fem.Constant(mesh, dfx.default_scalar_type(1))
 a = getAcceleration(u, displacement_old, displacement_old2, dt, dt_old)
 f = dfx.fem.Constant(mesh, dfx.default_scalar_type((0,) * topology_dim))
 displacement_weak_form = (
-    rho * ufl.inner(a, v) * ufl.dx
+    material.rho * ufl.inner(a, v) * ufl.dx
     + ((1 - crack_phase_old) ** 2) * ufl.inner(getStress(u), ufl.grad(v)) * ufl.dx
     - ufl.inner(f, v) * ufl.dx
 )
@@ -134,12 +121,12 @@ displacement_L = dfx.fem.form(ufl.rhs(displacement_weak_form))
 
 P = 0.5 * (p + crack_phase_old)
 crack_phase_weak_form = (
-    eta * (p - crack_phase_old) * q * ufl.dx
+    material.eta * (p - crack_phase_old) * q * ufl.dx
     - dt
     * (
-        2 * (1 - crack_phase_old) * energy_history * q
-        - Gc / lc * crack_phase_old * q
-        - Gc * lc * ufl.inner(ufl.nabla_grad(P), ufl.nabla_grad(q))
+        2 * (1 - P) * energy_history * q
+        - material.Gc / material.lc * crack_phase_old * q
+        - material.Gc * material.lc * ufl.inner(ufl.nabla_grad(P), ufl.nabla_grad(q))
     )
     * ufl.dx
 )
@@ -212,7 +199,7 @@ save_interval = preset.num_iterations // 20
 delta_t = preset.end_t / preset.num_iterations
 
 # warp_factor = 10 / preset.u_r
-warp_factor = 0
+warp_factor = 1
 
 getLoad = lambda t: (t / preset.end_t) * preset.u_r
 
@@ -247,13 +234,20 @@ class Timer:
         elif elapsed < 60:
             return f"{elapsed:.2f}s"
         elif elapsed < 3600:
-            return time.strftime("%Mm%Ss", time.gmtime(elapsed))
+            minutes = int(elapsed // 60)
+            seconds = elapsed % 60
+            return f"{minutes:d}m{seconds:.2f}s"
         elif elapsed < 86400:
-            return time.strftime("%Hh%Mm%Ss", time.gmtime(elapsed))
+            hours = int(elapsed // 3600)
+            minutes = int((elapsed % 3600) // 60)
+            seconds = elapsed % 60
+            return f"{hours:d}h{minutes:d}m{seconds:.2f}s"
         else:
-            t_str = time.strftime("%Hh%Mm%Ss", time.gmtime(elapsed))
-            day = elapsed // 86400
-            return f"{day}d{t_str}"
+            days = int(elapsed // 86400)
+            hours = int((elapsed % 86400) // 3600)
+            minutes = int((elapsed % 3600) // 60)
+            seconds = elapsed % 60
+            return f"{days:d}d{hours:d}h{minutes:d}m{seconds:.2f}s"
 
     def pause(self):
         self.pause_time = time.time()
@@ -304,32 +298,20 @@ delta_time_old = 0.0
 timer = Timer()
 total_timer = Timer()
 
-disp_solve_timer = Timer("disp_solve")
-disp_solve_timer.pause()
-energy_history_timer = Timer("energy_history")
-energy_history_timer.pause()
-crack_solve_timer = Timer("crack_solve")
-crack_solve_timer.pause()
-normal_timer = Timer("normal")
-normal_timer.pause()
-verbose_timer = Timer("verbose")
-verbose_timer.pause()
-plot_timer = Timer("plot")
-plot_timer.pause()
-update_timer = Timer("update")
-update_timer.pause()
-save_timer = Timer("save")
-save_timer.pause()
+timers = {
+    "disp_solve": Timer(),
+    "energy_history": Timer(),
+    "crack_solve": Timer(),
+    "normalize": Timer(),
+    "verbose": Timer(),
+    "plot": Timer(),
+    "update": Timer(),
+    "save": Timer(),
+}
 
-timer_list = [
-    disp_solve_timer,
-    energy_history_timer,
-    crack_solve_timer,
-    verbose_timer,
-    plot_timer,
-    update_timer,
-    save_timer,
-]
+for _, timer in timers.items():
+    timer.reset()
+    timer.pause()
 
 for idx, t in enumerate(T):
     delta_time_old = delta_time
@@ -344,23 +326,23 @@ for idx, t in enumerate(T):
     load_bot.value[preset.load_direction] = -getLoad(t)
 
     # Solve the problem
-    disp_solve_timer.resume()
+    timers["disp_solve"].resume()
     displacement_problem.solve()
-    disp_solve_timer.pause()
+    timers["disp_solve"].pause()
 
-    energy_history_timer.resume()
+    timers["energy_history"].resume()
     energy_history.interpolate(energy_history_expr)
-    energy_history_timer.pause()
+    timers["energy_history"].pause()
 
-    crack_solve_timer.resume()
+    timers["crack_solve"].resume()
     crack_phase_problem.solve()
-    crack_solve_timer.pause()
+    timers["crack_solve"].pause()
 
-    normal_timer.resume()
+    timers["normalize"].resume()
     crack_phase.x.array[:] = np.clip(crack_phase.x.array, crack_phase_old.x.array, 1)
-    normal_timer.pause()
+    timers["normalize"].pause()
 
-    verbose_timer.resume()
+    timers["verbose"].resume()
     if preset.verbose:
         u_tuple = getMaxMin(displacement, displacement_old)
         d_tuple = getMaxMin(crack_phase, crack_phase_old)
@@ -371,9 +353,9 @@ for idx, t in enumerate(T):
         print(
             f"  d max/min: {d_tuple[0]:.2e}/{d_tuple[1]:.2e}, δd max/min: {d_tuple[2]:.2e}/{d_tuple[3]:.2e}"
         )
-    verbose_timer.pause()
+    timers["verbose"].pause()
 
-    plot_timer.resume()
+    timers["plot"].resume()
     if have_pyvista:
         warp.point_data["Crack Phase"][:] = crack_phase.x.array
 
@@ -388,25 +370,25 @@ for idx, t in enumerate(T):
         plotter.app.processEvents()
 
         plotter.screenshot(screenshot_dir / f"{idx+1}.tiff")
-    plot_timer.pause()
+    timers["plot"].pause()
 
-    update_timer.resume()
+    timers["update"].resume()
     displacement_old2.x.array[:] = displacement_old.x.array
     displacement_old.x.array[:] = displacement.x.array
     crack_phase_old.x.array[:] = crack_phase.x.array
-    update_timer.pause()
+    timers["update"].pause()
 
-    save_timer.resume()
+    timers["save"].resume()
     if idx == 0 or (idx + 1) % save_interval == 0 or (idx + 1) == len(T):
         pvd_file.write_function(displacement, t)
         pvd_file.write_function(crack_phase, t)
         pvd_file.write_function(energy_history, t)
         print(f"Saved at {t:.3e}. Elapsed: {timer}, total elapsed: {total_timer}\n")
         timer.reset()
-    save_timer.pause()
+    timers["save"].pause()
 
 print(f"Simulation completed. Total time: {total_timer}\n")
 pvd_file.close()
 
-for timer in timer_list:
-    print(f"{timer.name}: {timer}")
+for name, timer in timers.items():
+    print(f"{name}: {timer}")
