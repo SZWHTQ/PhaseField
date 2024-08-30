@@ -2,12 +2,13 @@ import os
 
 os.environ["OMP_NUM_THREADS"] = "1"
 
-import numpy as np
-from mpi4py import MPI
-from petsc4py import PETSc
 import dolfinx as dfx
 import dolfinx.fem.petsc as petsc
 import ufl
+
+import numpy as np
+from mpi4py import MPI
+from petsc4py import PETSc
 
 try:
     import pyvista as pv
@@ -24,7 +25,7 @@ import time
 import sys
 from pathlib import Path
 
-import Presets as Presets
+import Presets
 
 preset = Presets.high_loading_rate
 material = preset.material
