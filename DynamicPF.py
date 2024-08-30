@@ -1,14 +1,13 @@
+import os
+
+os.environ["OMP_NUM_THREADS"] = "1"
+
 import numpy as np
-from mpi4py import MPI as mpi
+from mpi4py import MPI
+from petsc4py import PETSc
 import dolfinx as dfx
 import dolfinx.fem.petsc as petsc
 import ufl
-
-import time
-import os
-from pathlib import Path
-
-import Presets as Presets
 
 try:
     import pyvista as pv
@@ -21,16 +20,32 @@ except ModuleNotFoundError:
     print("pyvista and pyvistaqt are required to visualize the solution")
     have_pyvista = False
 
+import time
+import sys
+from pathlib import Path
+
+import Presets as Presets
+
 preset = Presets.high_loading_rate
 material = preset.material
 out_dir = Path(preset.output_directory)
 
-dfx.log.set_output_file(str(out_dir / "solve.log"))
+# MPI.Init()
+
+host = 0
+comm = MPI.COMM_WORLD
+rank = comm.Get_rank()
+if rank == host:
+    print(f"MPI size: {comm.Get_size()}")
+sys.stdout.flush()
+
+if rank == host:
+    dfx.log.set_output_file(str(out_dir / "solve.log"))
 
 # %% Create the mesh
 length = 100
 mesh = dfx.mesh.create_rectangle(
-    mpi.COMM_WORLD,
+    comm,
     [np.array([-length / 2, -length / 2]), np.array([length / 2, length / 2])],
     [400, 400],
     cell_type=dfx.mesh.CellType.quadrilateral,
@@ -95,6 +110,14 @@ energy_history_expr = dfx.fem.Expression(
     WW.element.interpolation_points(),
 )
 
+energy_history_ = dfx.fem.Function(V)
+energy_history_.name = "Energy History"
+
+energy_history_remap = dfx.fem.Expression(
+    energy_history,
+    V.element.interpolation_points(),
+)
+
 
 # %% Construct the weak form
 def getAcceleration(u, u_old, u_old2, dt, dt_old):
@@ -124,7 +147,7 @@ crack_phase_weak_form = (
     material.eta * (p - crack_phase_old) * q * ufl.dx
     - dt
     * (
-        2 * (1 - P) * energy_history * q
+        2 * (1 - crack_phase_old) * energy_history * q
         - material.Gc / material.lc * crack_phase_old * q
         - material.Gc * material.lc * ufl.inner(ufl.nabla_grad(P), ufl.nabla_grad(q))
     )
@@ -193,25 +216,24 @@ crack_phase_problem = petsc.LinearProblem(
 
 
 # %% Output, iterative scheme and tools
-pvd_file = dfx.io.VTKFile(mesh.comm, out_dir / "ParaView/results.pvd", "w")
-
 save_interval = preset.num_iterations // 20
+# save_interval = 1
 delta_t = preset.end_t / preset.num_iterations
-
-# warp_factor = 10 / preset.u_r
-warp_factor = 1
-
-getLoad = lambda t: (t / preset.end_t) * preset.u_r
 
 T = np.arange(delta_t, preset.end_t + delta_t / 2, delta_t)
 
+# warp_factor = 10 / preset.u_r
+warp_factor = 0
 
-def getMaxMin(u, u_old):
-    u_max = mesh.comm.allreduce(np.max(u.x.array), op=mpi.MAX)
-    u_min = mesh.comm.allreduce(np.min(u.x.array), op=mpi.MIN)
+getLoad = lambda t: (t / preset.end_t) * preset.u_r
 
-    delta_u_max = mesh.comm.allreduce(np.max(u.x.array - u_old.x.array), op=mpi.MAX)
-    delta_u_min = mesh.comm.allreduce(np.min(u.x.array - u_old.x.array), op=mpi.MIN)
+
+def getMaxMin(u: dfx.fem.Function, u_old: dfx.fem.Function):
+    u_max = comm.allreduce(np.max(u.x.array), op=MPI.MAX)
+    u_min = comm.allreduce(np.min(u.x.array), op=MPI.MIN)
+
+    delta_u_max = comm.allreduce(np.max(u.x.array - u_old.x.array), op=MPI.MAX)
+    delta_u_min = comm.allreduce(np.min(u.x.array - u_old.x.array), op=MPI.MIN)
 
     return u_max, u_min, delta_u_max, delta_u_min
 
@@ -229,7 +251,9 @@ class Timer:
 
     def __str__(self):
         elapsed = self.elapsed()
-        if elapsed < 1:
+        if elapsed < 0:
+            return "Negative time"
+        elif elapsed < 1:
             return f"{elapsed:.2e}s"
         elif elapsed < 60:
             return f"{elapsed:.2f}s"
@@ -259,9 +283,16 @@ class Timer:
             print("Timer was not paused")
 
 
+if preset.out_vtk:
+    pvd_file = dfx.io.VTKFile(comm, out_dir / "ParaView/results.pvd", "w")
+if preset.out_xdmf:
+    xdmf_file = dfx.io.XDMFFile(comm, out_dir / "XDMF/results.xdmf", "w")
+    xdmf_file.write_mesh(mesh)
+
 # %% Create visualization
-if have_pyvista:
+if preset.animation and have_pyvista:
     points_num = mesh.geometry.x.shape[0]
+    # print(f"Rank: {comm.Get_rank()}, Points num: {points_num}")
 
     grid = pv.UnstructuredGrid(*dfx.plot.vtk_mesh(mesh))
     grid.point_data["Crack Phase"] = crack_phase.x.array[:]
@@ -271,25 +302,37 @@ if have_pyvista:
     values[:, :topology_dim] = displacement.x.array.reshape(points_num, topology_dim)
     grid.point_data["Displacement"] = values
 
-    warp = grid.warp_by_vector("Displacement", factor=warp_factor)
+    warped = grid.warp_by_vector("Displacement", factor=warp_factor)
 
-    plotter = pvqt.BackgroundPlotter(
-        title="Dynamic Crack Phase Field",
-        auto_update=True,  # , window_size=(1600, 1120)
-    )
-    plotter.add_mesh(warp, show_edges=False, clim=[0, 1], cmap="coolwarm")
-    plotter.view_xy(False)
-    plotter.add_text("Time: 0.0", font_size=12, name="time_label")
+    if rank == host:
+        plotter = pvqt.BackgroundPlotter(
+            title="Dynamic Crack Phase Field",
+            auto_update=True,  # , window_size=(1600, 1120)
+        )
 
-    axes = pv.Axes(show_actor=True, actor_scale=10, line_width=5)
-    axes.origin = (-7, -5.5, 0)
-    plotter.add_actor(axes.actor)
-    plotter.app.processEvents()
+        plotter.add_mesh(warped, show_edges=False, clim=[0, 1], cmap="coolwarm")
+        warps = []
+        for i in range(1, comm.Get_size()):
+            warp_ = comm.recv(source=i)
+            warps.append(warp_)
+            plotter.add_mesh(warps[i - 1], clim=[0, 1], cmap="coolwarm")
 
-    screenshot_dir = out_dir / "Screenshots"
-    if not screenshot_dir.exists():
-        os.makedirs(screenshot_dir)
-    plotter.screenshot(screenshot_dir / "initial.tiff")
+        plotter.view_xy(False)
+        plotter.add_text("Time: 0.0", font_size=12, name="time_label")
+
+        axes = pv.Axes(show_actor=True, actor_scale=10, line_width=5)
+        axes.origin = (-7, -5.5, 0)
+        plotter.add_actor(axes.actor)
+        plotter.app.processEvents()
+
+        if preset.screenshot:
+            screenshot_dir = out_dir / "Screenshots"
+            if not screenshot_dir.exists():
+                os.makedirs(screenshot_dir)
+            plotter.screenshot(screenshot_dir / "initial.tiff")
+    else:
+        comm.send(warped, dest=host)
+    comm.Barrier()
 
 # %% Solve the problem
 time_old = 0.0
@@ -309,9 +352,9 @@ timers = {
     "save": Timer(),
 }
 
-for _, timer in timers.items():
-    timer.reset()
-    timer.pause()
+for _, t in timers.items():
+    t.reset()
+    t.pause()
 
 for idx, t in enumerate(T):
     delta_time_old = delta_time
@@ -342,34 +385,49 @@ for idx, t in enumerate(T):
     crack_phase.x.array[:] = np.clip(crack_phase.x.array, crack_phase_old.x.array, 1)
     timers["normalize"].pause()
 
+    comm.Barrier()
+
     timers["verbose"].resume()
     if preset.verbose:
         u_tuple = getMaxMin(displacement, displacement_old)
         d_tuple = getMaxMin(crack_phase, crack_phase_old)
-        print(f"Time: {t:.3e}, Load: {getLoad(t):.3e}, δt: {dt.value:.3e}")
-        print(
-            f"  u max/min: {u_tuple[0]:.2e}/{u_tuple[1]:.2e}, δu max/min: {u_tuple[2]:.2e}/{u_tuple[3]:.2e}"
-        )
-        print(
-            f"  d max/min: {d_tuple[0]:.2e}/{d_tuple[1]:.2e}, δd max/min: {d_tuple[2]:.2e}/{d_tuple[3]:.2e}"
-        )
+        if rank == host:
+            print(f"Time: {t:.3e}, Load: {getLoad(t):.3e}, δt: {dt.value:.3e}")
+            print(
+                f"  u max/min: {u_tuple[0]:.2e}/{u_tuple[1]:.2e}, δu max/min: {u_tuple[2]:.2e}/{u_tuple[3]:.2e}"
+            )
+            print(
+                f"  d max/min: {d_tuple[0]:.2e}/{d_tuple[1]:.2e}, δd max/min: {d_tuple[2]:.2e}/{d_tuple[3]:.2e}"
+            )
+            sys.stdout.flush()
     timers["verbose"].pause()
 
     timers["plot"].resume()
-    if have_pyvista:
-        warp.point_data["Crack Phase"][:] = crack_phase.x.array
+    if preset.animation and have_pyvista:
+        warped.point_data["Crack Phase"][:] = crack_phase.x.array
 
         grid.point_data["Displacement"][:, :topology_dim] = (
             displacement.x.array.reshape(points_num, topology_dim)
         )
 
         warp_ = grid.warp_by_vector("Displacement", factor=warp_factor)
-        warp.points[:, :] = warp_.points
+        warped.points[:, :] = warp_.points
 
-        plotter.add_text(f"Time: {t:.3e}", font_size=12, name="time_label")
-        plotter.app.processEvents()
+        if rank == host:
+            for i in range(1, comm.Get_size()):
+                warp_ = comm.recv(source=i)
+                warps[i - 1].point_data["Crack Phase"][:] = warp_.point_data[
+                    "Crack Phase"
+                ]
+                warps[i - 1].points[:, :] = warp_.points
+            plotter.add_text(f"Time: {t:.3e}", font_size=12, name="time_label")
+            plotter.app.processEvents()
 
-        plotter.screenshot(screenshot_dir / f"{idx+1}.tiff")
+            if preset.screenshot:
+                plotter.screenshot(screenshot_dir / f"{idx+1}.tiff")
+        else:
+            comm.send(warped, dest=host)
+        comm.Barrier()
     timers["plot"].pause()
 
     timers["update"].resume()
@@ -380,15 +438,41 @@ for idx, t in enumerate(T):
 
     timers["save"].resume()
     if idx == 0 or (idx + 1) % save_interval == 0 or (idx + 1) == len(T):
-        pvd_file.write_function(displacement, t)
-        pvd_file.write_function(crack_phase, t)
-        pvd_file.write_function(energy_history, t)
-        print(f"Saved at {t:.3e}. Elapsed: {timer}, total elapsed: {total_timer}\n")
-        timer.reset()
+        comm.Barrier()
+        if preset.out_vtk:
+            pvd_file.write_function(displacement, t)
+            pvd_file.write_function(crack_phase, t)
+            pvd_file.write_function(energy_history, t)
+        if preset.out_xdmf:
+            xdmf_file.write_function(displacement, t)
+            xdmf_file.write_function(crack_phase, t)
+            energy_history_.interpolate(energy_history_remap)
+            xdmf_file.write_function(energy_history_, t)
+        if rank == host:
+            print(f"Saved at {t:.3e}. Elapsed: {timer}, total elapsed: {total_timer}\n")
+            sys.stdout.flush()
+            timer.reset()
     timers["save"].pause()
 
-print(f"Simulation completed. Total time: {total_timer}\n")
-pvd_file.close()
+comm.Barrier()
+if preset.out_vtk:
+    pvd_file.close()
+if preset.out_xdmf:
+    xdmf_file.close()
+displacement_solver = displacement_problem.solver
+disp_viewer = PETSc.Viewer().createASCII(
+    str(out_dir / "disp_solver.txt"), "a", comm=comm
+)
+displacement_solver.view(disp_viewer)
+crack_phase_solver = crack_phase_problem.solver
+crack_viewer = PETSc.Viewer().createASCII(
+    str(out_dir / "crack_solver.txt"), "a", comm=comm
+)
+crack_phase_solver.view(crack_viewer)
 
-for name, timer in timers.items():
-    print(f"{name}: {timer}")
+if rank == host:
+    for name, timer in timers.items():
+        print(f"{name}: {timer}")
+    print(f"Simulation completed. Total time: {total_timer}\n")
+
+# MPI.Finalize()
