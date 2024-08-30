@@ -61,7 +61,6 @@ W = dfx.fem.functionspace(mesh, ("CG", 1, (topology_dim,)))
 V = dfx.fem.functionspace(mesh, ("CG", 1))
 WW = dfx.fem.functionspace(mesh, ("DG", 1))
 
-
 # Trial and test functions
 u, v = ufl.TrialFunction(W), ufl.TestFunction(W)
 p, q = ufl.TrialFunction(V), ufl.TestFunction(V)
@@ -136,21 +135,21 @@ a = getAcceleration(u, displacement_old, displacement_old2, dt, dt_old)
 f = dfx.fem.Constant(mesh, dfx.default_scalar_type((0,) * topology_dim))
 displacement_weak_form = (
     material.rho * ufl.inner(a, v) * ufl.dx
-    + ((1 - crack_phase_old) ** 2) * ufl.inner(getStress(u), ufl.grad(v)) * ufl.dx
+    + ((1 - crack_phase) ** 2) * ufl.inner(getStress(u), ufl.grad(v)) * ufl.dx
     - ufl.inner(f, v) * ufl.dx
 )
 displacement_a = dfx.fem.form(ufl.lhs(displacement_weak_form))
 displacement_L = dfx.fem.form(ufl.rhs(displacement_weak_form))
 
 
-P = 0.5 * (p + crack_phase_old)
+# P = 0.5 * (p + crack_phase_old)
 crack_phase_weak_form = (
     material.eta * (p - crack_phase_old) * q * ufl.dx
     - dt
     * (
-        2 * (1 - crack_phase_old) * energy_history * q
-        - material.Gc / material.lc * crack_phase_old * q
-        - material.Gc * material.lc * ufl.inner(ufl.nabla_grad(P), ufl.nabla_grad(q))
+        2 * (1 - p) * energy_history * q
+        - material.Gc / material.lc * p * q
+        - material.Gc * material.lc * ufl.inner(ufl.nabla_grad(p), ufl.nabla_grad(q))
     )
     * ufl.dx
 )
@@ -329,7 +328,7 @@ if preset.animation and have_pyvista:
         if preset.screenshot:
             screenshot_dir = out_dir / "Screenshots"
             if not screenshot_dir.exists():
-                os.makedirs(screenshot_dir)
+                screenshot_dir.mkdir(parents=True)
             plotter.screenshot(screenshot_dir / "initial.tiff")
     else:
         comm.send(warped, dest=host)
@@ -456,10 +455,12 @@ for idx, t in enumerate(T):
     timers["save"].pause()
 
 comm.Barrier()
+
 if preset.out_vtk:
     pvd_file.close()
 if preset.out_xdmf:
     xdmf_file.close()
+
 displacement_solver = displacement_problem.solver
 disp_viewer = PETSc.Viewer().createASCII(
     str(out_dir / "disp_solver.txt"), "a", comm=comm
@@ -475,5 +476,7 @@ if rank == host:
     for name, timer in timers.items():
         print(f"{name}: {timer}")
     print(f"Simulation completed. Total time: {total_timer}\n")
+    if preset.animation and have_pyvista:
+        plotter.close()
 
 # MPI.Finalize()
