@@ -342,9 +342,9 @@ timer = Timer()
 total_timer = Timer()
 
 timers = {
-    "disp_solve": Timer(),
+    "displacement_solve": Timer(),
     "energy_history": Timer(),
-    "crack_solve": Timer(),
+    "crack_phase_solve": Timer(),
     "normalize": Timer(),
     "verbose": Timer(),
     "plot": Timer(),
@@ -369,17 +369,17 @@ for idx, t in enumerate(T):
     load_bot.value[preset.load_direction] = -getLoad(t)
 
     # Solve the problem
-    timers["disp_solve"].resume()
+    timers["displacement_solve"].resume()
     displacement_problem.solve()
-    timers["disp_solve"].pause()
+    timers["displacement_solve"].pause()
 
     timers["energy_history"].resume()
     energy_history.interpolate(energy_history_expr)
     timers["energy_history"].pause()
 
-    timers["crack_solve"].resume()
+    timers["crack_phase_solve"].resume()
     crack_phase_problem.solve()
-    timers["crack_solve"].pause()
+    timers["crack_phase_solve"].pause()
 
     timers["normalize"].resume()
     crack_phase.x.array[:] = np.clip(crack_phase.x.array, crack_phase_old.x.array, 1)
@@ -463,12 +463,12 @@ if preset.out_xdmf:
 
 displacement_solver = displacement_problem.solver
 disp_viewer = PETSc.Viewer().createASCII(
-    str(out_dir / "disp_solver.txt"), "a", comm=comm
+    str(out_dir / "displacement_solver.txt"), "w", comm=comm
 )
 displacement_solver.view(disp_viewer)
 crack_phase_solver = crack_phase_problem.solver
 crack_viewer = PETSc.Viewer().createASCII(
-    str(out_dir / "crack_solver.txt"), "a", comm=comm
+    str(out_dir / "crack_phase_solver.txt"), "w", comm=comm
 )
 crack_phase_solver.view(crack_viewer)
 

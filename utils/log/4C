@@ -1,0 +1,15 @@
+MPI size: 4
+Saved at 8.000e-06. Elapsed: 1.33e-01s, total elapsed: 1.33e-01s
+
+Saved at 2.000e-04. Elapsed: 7.22s, total elapsed: 7.36s
+
+disp_solve: 6.62s
+energy_history: 1.52e-01s
+crack_solve: 6.26e-01s
+normalize: 5.34e-03s
+verbose: 1.25e-03s
+plot: 1.23e-03s
+update: 9.16e-03s
+save: 1.05e-03s
+Simulation completed. Total time: 7.36s
+
