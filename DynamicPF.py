@@ -57,27 +57,27 @@ boundary_dim = topology_dim - 1
 
 
 # %% Define function spaces
-W = dfx.fem.functionspace(mesh, ("CG", 1, (topology_dim,)))
-V = dfx.fem.functionspace(mesh, ("CG", 1))
-WW = dfx.fem.functionspace(mesh, ("DG", 1))
+V = dfx.fem.functionspace(mesh, ("CG", 1, (topology_dim,)))
+S = dfx.fem.functionspace(mesh, ("CG", 1))
+DS = dfx.fem.functionspace(mesh, ("DG", 1))
 
 # Trial and test functions
-u, v = ufl.TrialFunction(W), ufl.TestFunction(W)
-p, q = ufl.TrialFunction(V), ufl.TestFunction(V)
+u, v = ufl.TrialFunction(V), ufl.TestFunction(V)
+p, q = ufl.TrialFunction(S), ufl.TestFunction(S)
 
 # Variable functions
-displacement = dfx.fem.Function(W)  # u_{k+1}
-displacement_old = dfx.fem.Function(W)  # u_k
-displacement_old2 = dfx.fem.Function(W)  # u_{k-1}
+displacement = dfx.fem.Function(V)  # u_{k+1}
+displacement_old = dfx.fem.Function(V)  # u_k
+displacement_old2 = dfx.fem.Function(V)  # u_{k-1}
 
-crack_phase = dfx.fem.Function(V)  # d_{k+1}
-crack_phase_old = dfx.fem.Function(V)  # d_k
+crack_phase = dfx.fem.Function(S)  # d_{k+1}
+crack_phase_old = dfx.fem.Function(S)  # d_k
 
-energy_history = dfx.fem.Function(WW)  # H_{k+1}
+energy_history = dfx.fem.Function(DS)  # H_{k+1}
 
 displacement.name = "Displacement"
-crack_phase.name = "Crack Phase"
-energy_history.name = "Energy History"
+crack_phase.name = "Crack_Phase"
+energy_history.name = "Energy_History"
 
 
 # %% Define constitutive relations
@@ -107,16 +107,19 @@ energy_history_expr = dfx.fem.Expression(
         getStrainEnergy(displacement),
         energy_history,
     ),
-    WW.element.interpolation_points(),
+    DS.element.interpolation_points(),
 )
 
-energy_history_ = dfx.fem.Function(V)
-energy_history_.name = "Energy History"
+subV = dfx.fem.functionspace(mesh, ("CG", 1, (topology_dim,)))
+subS = dfx.fem.functionspace(mesh, ("CG", 1))
 
-energy_history_remap = dfx.fem.Expression(
-    energy_history,
-    V.element.interpolation_points(),
-)
+_displacement = dfx.fem.Function(subV)
+_crack_phase = dfx.fem.Function(subS)
+_energy_history = dfx.fem.Function(subS)
+
+_displacement.name = "Displacement"
+_crack_phase.name = "Crack Phase"
+_energy_history.name = "Energy History"
 
 
 # %% Construct the weak form
@@ -131,25 +134,26 @@ dt = dfx.fem.Constant(mesh, dfx.default_scalar_type(1))
 dt_old = dfx.fem.Constant(mesh, dfx.default_scalar_type(1))
 
 
+U = 0.5 * (u + displacement_old)
 a = getAcceleration(u, displacement_old, displacement_old2, dt, dt_old)
 f = dfx.fem.Constant(mesh, dfx.default_scalar_type((0,) * topology_dim))
 displacement_weak_form = (
     material.rho * ufl.inner(a, v) * ufl.dx
-    + ((1 - crack_phase) ** 2) * ufl.inner(getStress(u), ufl.grad(v)) * ufl.dx
+    + ((1 - crack_phase) ** 2) * ufl.inner(getStress(U), ufl.grad(v)) * ufl.dx
     - ufl.inner(f, v) * ufl.dx
 )
 displacement_a = dfx.fem.form(ufl.lhs(displacement_weak_form))
 displacement_L = dfx.fem.form(ufl.rhs(displacement_weak_form))
 
 
-# P = 0.5 * (p + crack_phase_old)
+P = 0.5 * (p + crack_phase_old)
 crack_phase_weak_form = (
     material.eta * (p - crack_phase_old) * q * ufl.dx
     - dt
     * (
-        2 * (1 - p) * energy_history * q
-        - material.Gc / material.lc * p * q
-        - material.Gc * material.lc * ufl.inner(ufl.nabla_grad(p), ufl.nabla_grad(q))
+        2 * (1 - P) * energy_history * q
+        - material.Gc / material.lc * P * q
+        - material.Gc * material.lc * ufl.inner(ufl.nabla_grad(P), ufl.nabla_grad(q))
     )
     * ufl.dx
 )
@@ -171,14 +175,14 @@ load_top = dfx.fem.Constant(
     dfx.default_scalar_type((0.0,) * topology_dim),
 )
 bc_top = dfx.fem.dirichletbc(
-    load_top, dfx.fem.locate_dofs_topological(W, boundary_dim, top), W
+    load_top, dfx.fem.locate_dofs_topological(V, boundary_dim, top), V
 )
 load_bot = dfx.fem.Constant(
     mesh,
     dfx.default_scalar_type((0.0,) * topology_dim),
 )
 bc_bot = dfx.fem.dirichletbc(
-    load_bot, dfx.fem.locate_dofs_topological(W, boundary_dim, bot), W
+    load_bot, dfx.fem.locate_dofs_topological(V, boundary_dim, bot), V
 )
 
 displacement_bcs = [bc_bot, bc_top]
@@ -195,8 +199,8 @@ def is_crack(x):
 crack_phase_bcs = [
     dfx.fem.dirichletbc(
         dfx.fem.Constant(mesh, dfx.default_scalar_type(1.0)),
-        dfx.fem.locate_dofs_geometrical(V, is_crack),
-        V,
+        dfx.fem.locate_dofs_geometrical(S, is_crack),
+        S,
     )
 ]
 
@@ -225,7 +229,9 @@ T = np.arange(delta_t, preset.end_t + delta_t / 2, delta_t)
 # warp_factor = 10 / preset.u_r
 warp_factor = 0
 
-getLoad = lambda t: (t / preset.end_t) * preset.u_r
+
+def getLoad(t):
+    return t / preset.end_t * preset.u_r
 
 
 def getMaxMin(u: dfx.fem.Function, u_old: dfx.fem.Function):
@@ -291,15 +297,17 @@ if preset.out_xdmf:
 
 # %% Create visualization
 if preset.animation and have_pyvista:
+    _displacement.interpolate(displacement)
+    _crack_phase.interpolate(crack_phase)
+
     points_num = mesh.geometry.x.shape[0]
-    # print(f"Rank: {comm.Get_rank()}, Points num: {points_num}")
 
     grid = pv.UnstructuredGrid(*dfx.plot.vtk_mesh(mesh))
-    grid.point_data["Crack Phase"] = crack_phase.x.array[:]
+    grid.point_data["Crack Phase"] = _crack_phase.x.array[:]
     grid.set_active_scalars("Crack Phase")
 
     values = np.zeros((points_num, 3))
-    values[:, :topology_dim] = displacement.x.array.reshape(points_num, topology_dim)
+    values[:, :topology_dim] = _displacement.x.array.reshape(points_num, topology_dim)
     grid.point_data["Displacement"] = values
 
     warped = grid.warp_by_vector("Displacement", factor=warp_factor)
@@ -402,12 +410,17 @@ for idx, t in enumerate(T):
             sys.stdout.flush()
     timers["verbose"].pause()
 
+    if preset.animation or preset.out_vtk or preset.out_xdmf:
+        _displacement.interpolate(displacement)
+        _crack_phase.interpolate(crack_phase)
+        _energy_history.interpolate(energy_history)
+
     timers["plot"].resume()
     if preset.animation and have_pyvista:
-        warped.point_data["Crack Phase"][:] = crack_phase.x.array
+        warped.point_data["Crack Phase"][:] = _crack_phase.x.array
 
         grid.point_data["Displacement"][:, :topology_dim] = (
-            displacement.x.array.reshape(points_num, topology_dim)
+            _displacement.x.array.reshape(points_num, topology_dim)
         )
 
         warp_ = grid.warp_by_vector("Displacement", factor=warp_factor)
@@ -438,16 +451,14 @@ for idx, t in enumerate(T):
 
     timers["save"].resume()
     if idx == 0 or (idx + 1) % save_interval == 0 or (idx + 1) == len(T):
-        comm.Barrier()
         if preset.out_vtk:
-            pvd_file.write_function(displacement, t)
-            pvd_file.write_function(crack_phase, t)
-            pvd_file.write_function(energy_history, t)
+            pvd_file.write_function(_displacement, t)
+            pvd_file.write_function(_crack_phase, t)
+            pvd_file.write_function(_energy_history, t)
         if preset.out_xdmf:
-            xdmf_file.write_function(displacement, t)
-            xdmf_file.write_function(crack_phase, t)
-            energy_history_.interpolate(energy_history_remap)
-            xdmf_file.write_function(energy_history_, t)
+            xdmf_file.write_function(_displacement, t)
+            xdmf_file.write_function(_crack_phase, t)
+            xdmf_file.write_function(_energy_history, t)
         if rank == host:
             print(f"Saved at {t:.3e}. Elapsed: {timer}, total elapsed: {total_timer}\n")
             sys.stdout.flush()
