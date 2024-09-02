@@ -33,7 +33,7 @@ import ConstitutiveRelation as cr
 preset = Presets.high_loading_rate
 material = preset.material
 
-constitutive = cr.Elastic_AmorMarigo2009(preset.material)
+constitutive = cr.Elastic_BourdinFrancfort2008(preset.material)
 
 out_dir = Path(preset.output_directory)
 
@@ -67,7 +67,6 @@ boundary_dim = topology_dim - 1
 V = dfx.fem.functionspace(mesh, ("CG", 1, (topology_dim,)))
 S = dfx.fem.functionspace(mesh, ("CG", 1))
 DS = dfx.fem.functionspace(mesh, ("DG", 1))
-# M = dfx.fem.functionspace(mesh, ("CG", 1, (topology_dim, topology_dim)))
 
 # Trial and test functions
 u, v = ufl.TrialFunction(V), ufl.TestFunction(V)
@@ -83,34 +82,12 @@ crack_phase_old = dfx.fem.Function(S)  # d_k
 
 energy_history = dfx.fem.Function(DS)  # H_{k+1}
 
-# stress = dfx.fem.Function(M)  # σ_{k+1}
-
 displacement.name = "Displacement"
 crack_phase.name = "Crack_Phase"
 energy_history.name = "Energy_History"
 
 
 # %% Define constitutive relations
-# def getStrain(u):
-#     return ufl.sym(ufl.grad(u))
-
-
-# def getStress(u):
-#     return 2.0 * material.mu * getStrain(u) + material.lame * ufl.tr(
-#         getStrain(u)
-#     ) * ufl.Identity(len(u))
-
-
-# def getStrainEnergy(u):
-#     return 0.5 * (material.lame + material.mu) * (
-#         0.5 * (ufl.tr(getStrain(u)) + abs(ufl.tr(getStrain(u))))
-#     ) ** 2 + material.mu * ufl.inner(ufl.dev(getStrain(u)), ufl.dev(getStrain(u)))
-
-
-# strain_energy_expr = dfx.fem.Expression(
-#     getStrainEnergy(displacement), V.element.interpolation_points()
-# )
-
 energy_history_expr = dfx.fem.Expression(
     ufl.conditional(
         ufl.gt(
@@ -122,9 +99,6 @@ energy_history_expr = dfx.fem.Expression(
     ),
     DS.element.interpolation_points(),
 )
-# stress_expr = dfx.fem.Expression(
-#     elastic.getStress(displacement_old, crack_phase), M.element.interpolation_points()
-# )
 
 
 subV = dfx.fem.functionspace(mesh, ("CG", 1, (topology_dim,)))
@@ -476,7 +450,9 @@ for idx, t in enumerate(T):
         if rank == host:
             print(f"Time: {t:.3e}, Load: {getLoad(t):.3e}, δt: {dt.value:.3e}")
             if not constitutive.linear:
-                print(f"  Nonlinear displacement problem solver converged in {num_its} iterations")
+                print(
+                    f"  Nonlinear displacement problem solver converged in {num_its} iterations"
+                )
             print(
                 f"  u max/min: {u_tuple[0]:.2e}/{u_tuple[1]:.2e}, δu max/min: {u_tuple[2]:.2e}/{u_tuple[3]:.2e}"
             )
