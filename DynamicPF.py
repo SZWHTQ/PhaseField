@@ -5,7 +5,7 @@ os.environ["OMP_NUM_THREADS"] = "1"
 import dolfinx as dfx
 import dolfinx.fem.petsc as petsc
 
-# from dolfinx.nls.petsc import NewtonSolver
+from dolfinx.nls.petsc import NewtonSolver
 import ufl
 
 import numpy as np
@@ -32,6 +32,9 @@ import ConstitutiveRelation as cr
 
 preset = Presets.high_loading_rate
 material = preset.material
+
+constitutive = cr.Elastic_AmorMarigo2009(preset.material)
+
 out_dir = Path(preset.output_directory)
 
 # MPI.Init()
@@ -41,9 +44,10 @@ comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 if rank == host:
     print(f"MPI size: {comm.Get_size()}")
-sys.stdout.flush()
+    print(f"Using {constitutive}")
 
-if rank == host:
+    sys.stdout.flush()
+
     dfx.log.set_output_file(str(out_dir / "solve.log"))
 
 # %% Create the mesh
@@ -107,14 +111,13 @@ energy_history.name = "Energy_History"
 #     getStrainEnergy(displacement), V.element.interpolation_points()
 # )
 
-elastic = cr.Elastic_BourdinFrancfort2008(preset.material)
-
 energy_history_expr = dfx.fem.Expression(
     ufl.conditional(
         ufl.gt(
-            elastic.getStrainEnergyPositive(displacement, crack_phase), energy_history
+            constitutive.getStrainEnergyPositive(displacement, crack_phase),
+            energy_history,
         ),
-        elastic.getStrainEnergyPositive(displacement, crack_phase),
+        constitutive.getStrainEnergyPositive(displacement, crack_phase),
         energy_history,
     ),
     DS.element.interpolation_points(),
@@ -148,22 +151,25 @@ dt = dfx.fem.Constant(mesh, dfx.default_scalar_type(1))
 dt_old = dfx.fem.Constant(mesh, dfx.default_scalar_type(1))
 
 U = 0.5 * (displacement + displacement_old)
-a = getAcceleration(u, displacement_old, displacement_old2, dt, dt_old)
-f = dfx.fem.Constant(mesh, dfx.default_scalar_type((0,) * topology_dim))
-displacement_weak_form = (
-    material.rho * ufl.inner(a, v)
-    + ufl.inner(elastic.getStress(u, crack_phase), ufl.grad(v))
-    - ufl.inner(f, v)
-) * ufl.dx
-displacement_a = dfx.fem.form(ufl.lhs(displacement_weak_form))
-displacement_L = dfx.fem.form(ufl.rhs(displacement_weak_form))
+if constitutive.linear:
+    a = getAcceleration(u, displacement_old, displacement_old2, dt, dt_old)
+    f = dfx.fem.Constant(mesh, dfx.default_scalar_type((0,) * topology_dim))
+    displacement_weak_form = (
+        material.rho * ufl.inner(a, v)
+        + ufl.inner(constitutive.getStress(u, crack_phase), ufl.grad(v))
+        - ufl.inner(f, v)
+    ) * ufl.dx
+    displacement_a = dfx.fem.form(ufl.lhs(displacement_weak_form))
+    displacement_L = dfx.fem.form(ufl.rhs(displacement_weak_form))
 
-# displacement_a = material.rho * ufl.inner(a, v) * ufl.dx
-# displacement_L = (
-#     ufl.inner(elastic.getStress(u, crack_phase), ufl.grad(v)) * ufl.dx
-#     - ufl.inner(f, v) * ufl.dx
-# )
-
+else:
+    a = getAcceleration(displacement, displacement_old, displacement_old2, dt, dt_old)
+    f = dfx.fem.Constant(mesh, dfx.default_scalar_type((0,) * topology_dim))
+    displacement_weak_form = (
+        material.rho * ufl.inner(a, v)
+        + ufl.inner(constitutive.getStress(displacement, crack_phase), ufl.grad(v))
+        - ufl.inner(f, v)
+    ) * ufl.dx
 
 P = 0.5 * (p + crack_phase_old)
 crack_phase_weak_form = (
@@ -235,21 +241,38 @@ crack_phase_bcs = [
 ]
 
 # Construct linear problems
-displacement_problem = petsc.LinearProblem(
-    a=displacement_a,
-    L=displacement_L,
-    bcs=displacement_bcs,
-    u=displacement,
-)
-# displacement_problem = petsc.NonlinearProblem(
-#     F=displacement_weak_form,
-#     u=displacement,
-#     bcs=displacement_bcs,
-# )
-# displacement_solver = NewtonSolver(comm, displacement_problem)
-# displacement_solver.atol = 1e-8
-# displacement_solver.rtol = 1e-8
-# displacement_solver.convergence_criterion = "incremental"
+if constitutive.linear:
+    displacement_problem = petsc.LinearProblem(
+        a=displacement_a,
+        L=displacement_L,
+        bcs=displacement_bcs,
+        u=displacement,
+    )
+else:
+    displacement_problem = petsc.NonlinearProblem(
+        F=displacement_weak_form,
+        u=displacement,
+        bcs=displacement_bcs,
+    )
+
+    displacement_solver = NewtonSolver(comm, displacement_problem)
+
+    displacement_solver.convergence_criterion = "incremental"
+    displacement_solver.rtol = 1e-6
+    displacement_solver.report = True
+
+    ksp = displacement_solver.krylov_solver
+    opts = PETSc.Options()
+    option_prefix = ksp.getOptionsPrefix()
+    opts[f"{option_prefix}ksp_type"] = "preonly"
+    opts[f"{option_prefix}pc_type"] = "lu"
+    petsc_sys = PETSc.Sys()  # type: ignore
+    # For factorization prefer MUMPS, then superlu_dist, then default.
+    if petsc_sys.hasExternalPackage("mumps"):
+        opts[f"{option_prefix}pc_factor_mat_solver_type"] = "mumps"
+    elif petsc_sys.hasExternalPackage("superlu_dist"):
+        opts[f"{option_prefix}pc_factor_mat_solver_type"] = "superlu_dist"
+    ksp.setFromOptions()
 
 crack_phase_problem = petsc.LinearProblem(
     a=crack_phase_a,
@@ -405,12 +428,18 @@ for _, t in timers.items():
     t.pause()
 
 for idx, t in enumerate(T):
-    delta_time_old = delta_time
+    if idx == 0:
+        delta_time_old = t - time_old
+    else:
+        delta_time_old = delta_time
+    # delta_time_old = delta_time
     delta_time = t - time_old
     time_old = t
 
     dt.value = delta_time
     dt_old.value = delta_time_old
+
+    # print(f"dt: {dt.value:.3e}, dt_old: {dt_old.value:.3e}")
 
     # Update the load
     load_top.value[preset.load_direction] = getLoad(t)
@@ -418,9 +447,11 @@ for idx, t in enumerate(T):
 
     # Solve the problem
     timers["displacement_solve"].resume()
-    displacement_problem.solve()
-    # num_its, converged = displacement_solver.solve(displacement)
-    # assert converged
+    if constitutive.linear:
+        displacement_problem.solve()
+    else:
+        num_its, converged = displacement_solver.solve(displacement)
+        assert converged, "Displacement solver did not converge"
     timers["displacement_solve"].pause()
 
     timers["energy_history"].resume()
@@ -444,6 +475,8 @@ for idx, t in enumerate(T):
         d_tuple = getMaxMin(crack_phase, crack_phase_old)
         if rank == host:
             print(f"Time: {t:.3e}, Load: {getLoad(t):.3e}, δt: {dt.value:.3e}")
+            if not constitutive.linear:
+                print(f"  Nonlinear displacement problem solver converged in {num_its} iterations")
             print(
                 f"  u max/min: {u_tuple[0]:.2e}/{u_tuple[1]:.2e}, δu max/min: {u_tuple[2]:.2e}/{u_tuple[3]:.2e}"
             )
@@ -513,11 +546,12 @@ if preset.out_vtk:
 if preset.out_xdmf:
     xdmf_file.close()
 
-displacement_solver = displacement_problem.solver
-disp_viewer = PETSc.Viewer().createASCII(
-    str(out_dir / "displacement_solver.txt"), "w", comm=comm
-)
-displacement_solver.view(disp_viewer)
+if constitutive.linear:
+    displacement_solver = displacement_problem.solver
+    disp_viewer = PETSc.Viewer().createASCII(
+        str(out_dir / "displacement_solver.txt"), "w", comm=comm
+    )
+    displacement_solver.view(disp_viewer)
 crack_phase_solver = crack_phase_problem.solver
 crack_viewer = PETSc.Viewer().createASCII(
     str(out_dir / "crack_phase_solver.txt"), "w", comm=comm
