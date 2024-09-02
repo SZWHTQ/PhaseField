@@ -1,21 +1,10 @@
 import pathlib
 
-
-class Material:
-    def __init__(self):
-        # Mechanical properties
-        self.rho = 7e-6  # Mass Density
-        self.lame = 1.2e5  # Lamé coefficient
-        self.mu = 8e4  # Shear modulus
-
-        # Crack phase properties
-        self.Gc = 2.7  # Critical energy release rate
-        self.lc = 0.5  # Characteristic length
-        self.eta = 1e-3  # Crack phase viscosity parameter
+from Material import Brittle
 
 
 class Preset:
-    def __init__(self, name="Default", material=Material()):
+    def __init__(self, name="Default", material=Brittle()):
         self.__name = name
 
         self.output_directory = pathlib.Path("result/Output")
@@ -38,12 +27,12 @@ class Preset:
 default = Preset()
 
 name = "HighLoadingRate"
-mat = Material()
+mat = Brittle()
 mat.lc = 0.5
 high_loading_rate = Preset(name, mat)
 high_loading_rate.output_directory = pathlib.Path("test") / name
 high_loading_rate.u_r = 0.2
-high_loading_rate.end_t = 4e-3
+high_loading_rate.end_t = 2e-3
 high_loading_rate.num_iterations = 500
 
 name = "LowLoadingRate"

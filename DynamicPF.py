@@ -4,6 +4,8 @@ os.environ["OMP_NUM_THREADS"] = "1"
 
 import dolfinx as dfx
 import dolfinx.fem.petsc as petsc
+
+# from dolfinx.nls.petsc import NewtonSolver
 import ufl
 
 import numpy as np
@@ -26,6 +28,7 @@ import sys
 from pathlib import Path
 
 import Presets
+import ConstitutiveRelation as cr
 
 preset = Presets.high_loading_rate
 material = preset.material
@@ -60,6 +63,7 @@ boundary_dim = topology_dim - 1
 V = dfx.fem.functionspace(mesh, ("CG", 1, (topology_dim,)))
 S = dfx.fem.functionspace(mesh, ("CG", 1))
 DS = dfx.fem.functionspace(mesh, ("DG", 1))
+# M = dfx.fem.functionspace(mesh, ("CG", 1, (topology_dim, topology_dim)))
 
 # Trial and test functions
 u, v = ufl.TrialFunction(V), ufl.TestFunction(V)
@@ -75,40 +79,50 @@ crack_phase_old = dfx.fem.Function(S)  # d_k
 
 energy_history = dfx.fem.Function(DS)  # H_{k+1}
 
+# stress = dfx.fem.Function(M)  # σ_{k+1}
+
 displacement.name = "Displacement"
 crack_phase.name = "Crack_Phase"
 energy_history.name = "Energy_History"
 
 
 # %% Define constitutive relations
-def getStrain(u):
-    return ufl.sym(ufl.grad(u))
+# def getStrain(u):
+#     return ufl.sym(ufl.grad(u))
 
 
-def getStress(u):
-    return 2.0 * material.mu * getStrain(u) + material.lame * ufl.tr(
-        getStrain(u)
-    ) * ufl.Identity(len(u))
+# def getStress(u):
+#     return 2.0 * material.mu * getStrain(u) + material.lame * ufl.tr(
+#         getStrain(u)
+#     ) * ufl.Identity(len(u))
 
 
-def getStrainEnergy(u):
-    return 0.5 * (material.lame + material.mu) * (
-        0.5 * (ufl.tr(getStrain(u)) + abs(ufl.tr(getStrain(u))))
-    ) ** 2 + material.mu * ufl.inner(ufl.dev(getStrain(u)), ufl.dev(getStrain(u)))
+# def getStrainEnergy(u):
+#     return 0.5 * (material.lame + material.mu) * (
+#         0.5 * (ufl.tr(getStrain(u)) + abs(ufl.tr(getStrain(u))))
+#     ) ** 2 + material.mu * ufl.inner(ufl.dev(getStrain(u)), ufl.dev(getStrain(u)))
 
 
 # strain_energy_expr = dfx.fem.Expression(
 #     getStrainEnergy(displacement), V.element.interpolation_points()
 # )
 
+elastic = cr.Elastic_BourdinFrancfort2008(preset.material)
+
 energy_history_expr = dfx.fem.Expression(
     ufl.conditional(
-        ufl.gt(getStrainEnergy(displacement), energy_history),
-        getStrainEnergy(displacement),
+        ufl.gt(
+            elastic.getStrainEnergyPositive(displacement, crack_phase), energy_history
+        ),
+        elastic.getStrainEnergyPositive(displacement, crack_phase),
         energy_history,
     ),
     DS.element.interpolation_points(),
 )
+# stress_expr = dfx.fem.Expression(
+#     elastic.getStress(displacement_old, crack_phase), M.element.interpolation_points()
+# )
+
 
 subV = dfx.fem.functionspace(mesh, ("CG", 1, (topology_dim,)))
 subS = dfx.fem.functionspace(mesh, ("CG", 1))
@@ -133,17 +147,22 @@ def getAcceleration(u, u_old, u_old2, dt, dt_old):
 dt = dfx.fem.Constant(mesh, dfx.default_scalar_type(1))
 dt_old = dfx.fem.Constant(mesh, dfx.default_scalar_type(1))
 
-
-U = 0.5 * (u + displacement_old)
+U = 0.5 * (displacement + displacement_old)
 a = getAcceleration(u, displacement_old, displacement_old2, dt, dt_old)
 f = dfx.fem.Constant(mesh, dfx.default_scalar_type((0,) * topology_dim))
 displacement_weak_form = (
-    material.rho * ufl.inner(a, v) * ufl.dx
-    + ((1 - crack_phase) ** 2) * ufl.inner(getStress(U), ufl.grad(v)) * ufl.dx
-    - ufl.inner(f, v) * ufl.dx
-)
+    material.rho * ufl.inner(a, v)
+    + ufl.inner(elastic.getStress(u, crack_phase), ufl.grad(v))
+    - ufl.inner(f, v)
+) * ufl.dx
 displacement_a = dfx.fem.form(ufl.lhs(displacement_weak_form))
 displacement_L = dfx.fem.form(ufl.rhs(displacement_weak_form))
+
+# displacement_a = material.rho * ufl.inner(a, v) * ufl.dx
+# displacement_L = (
+#     ufl.inner(elastic.getStress(u, crack_phase), ufl.grad(v)) * ufl.dx
+#     - ufl.inner(f, v) * ufl.dx
+# )
 
 
 P = 0.5 * (p + crack_phase_old)
@@ -151,8 +170,8 @@ crack_phase_weak_form = (
     material.eta * (p - crack_phase_old) * q * ufl.dx
     - dt
     * (
-        2 * (1 - P) * energy_history * q
-        - material.Gc / material.lc * P * q
+        2 * (1 - crack_phase_old) * energy_history * q
+        - material.Gc / material.lc * crack_phase_old * q
         - material.Gc * material.lc * ufl.inner(ufl.nabla_grad(P), ufl.nabla_grad(q))
     )
     * ufl.dx
@@ -196,12 +215,23 @@ def is_crack(x):
     )
 
 
+def is_void(x):
+    r = 5.0
+    c = [20.0, 20.0]
+    return np.less_equal(np.sqrt((x[0] - c[0]) ** 2 + (x[1] - c[1]) ** 2), r)
+
+
 crack_phase_bcs = [
     dfx.fem.dirichletbc(
         dfx.fem.Constant(mesh, dfx.default_scalar_type(1.0)),
         dfx.fem.locate_dofs_geometrical(S, is_crack),
         S,
-    )
+    ),
+    # dfx.fem.dirichletbc(
+    #     dfx.fem.Constant(mesh, dfx.default_scalar_type(1.0)),
+    #     dfx.fem.locate_dofs_geometrical(S, is_void),
+    #     S,
+    # ),
 ]
 
 # Construct linear problems
@@ -211,6 +241,16 @@ displacement_problem = petsc.LinearProblem(
     bcs=displacement_bcs,
     u=displacement,
 )
+# displacement_problem = petsc.NonlinearProblem(
+#     F=displacement_weak_form,
+#     u=displacement,
+#     bcs=displacement_bcs,
+# )
+# displacement_solver = NewtonSolver(comm, displacement_problem)
+# displacement_solver.atol = 1e-8
+# displacement_solver.rtol = 1e-8
+# displacement_solver.convergence_criterion = "incremental"
+
 crack_phase_problem = petsc.LinearProblem(
     a=crack_phase_a,
     L=crack_phase_L,
@@ -303,12 +343,12 @@ if preset.animation and have_pyvista:
     points_num = mesh.geometry.x.shape[0]
 
     grid = pv.UnstructuredGrid(*dfx.plot.vtk_mesh(mesh))
-    grid.point_data["Crack Phase"] = _crack_phase.x.array[:]
+    grid["Crack Phase"] = _crack_phase.x.array
     grid.set_active_scalars("Crack Phase")
 
     values = np.zeros((points_num, 3))
     values[:, :topology_dim] = _displacement.x.array.reshape(points_num, topology_dim)
-    grid.point_data["Displacement"] = values
+    grid["Displacement"] = values
 
     warped = grid.warp_by_vector("Displacement", factor=warp_factor)
 
@@ -379,10 +419,13 @@ for idx, t in enumerate(T):
     # Solve the problem
     timers["displacement_solve"].resume()
     displacement_problem.solve()
+    # num_its, converged = displacement_solver.solve(displacement)
+    # assert converged
     timers["displacement_solve"].pause()
 
     timers["energy_history"].resume()
     energy_history.interpolate(energy_history_expr)
+    # stress.interpolate(stress_expr)
     timers["energy_history"].pause()
 
     timers["crack_phase_solve"].resume()
@@ -417,10 +460,10 @@ for idx, t in enumerate(T):
 
     timers["plot"].resume()
     if preset.animation and have_pyvista:
-        warped.point_data["Crack Phase"][:] = _crack_phase.x.array
+        warped["Crack Phase"][:] = _crack_phase.x.array
 
-        grid.point_data["Displacement"][:, :topology_dim] = (
-            _displacement.x.array.reshape(points_num, topology_dim)
+        grid["Displacement"][:, :topology_dim] = _displacement.x.array.reshape(
+            points_num, topology_dim
         )
 
         warp_ = grid.warp_by_vector("Displacement", factor=warp_factor)
@@ -429,9 +472,7 @@ for idx, t in enumerate(T):
         if rank == host:
             for i in range(1, comm.Get_size()):
                 warp_ = comm.recv(source=i)
-                warps[i - 1].point_data["Crack Phase"][:] = warp_.point_data[
-                    "Crack Phase"
-                ]
+                warps[i - 1]["Crack Phase"][:] = warp_["Crack Phase"]
                 warps[i - 1].points[:, :] = warp_.points
             plotter.add_text(f"Time: {t:.3e}", font_size=12, name="time_label")
             plotter.app.processEvents()
