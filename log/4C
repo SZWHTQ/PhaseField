@@ -1,0 +1,16 @@
+MPI size: 4
+Using Linear Bourdin Francfort 2008
+Saved at 1.000e-05. Elapsed: 3.66e-01s, total elapsed: 3.66e-01s
+
+Saved at 2.000e-04. Elapsed: 7.07s, total elapsed: 7.44s
+
+displacement_solve: 6.77s
+energy_history: 1.30e-01s
+crack_phase_solve: 5.94e-01s
+normalize: 4.30e-03s
+verbose: 9.49e-04s
+plot: 9.30e-04s
+update: 7.90e-03s
+save: 8.51e-04s
+Simulation completed. Total time: 7.44s
+

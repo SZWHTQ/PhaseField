@@ -49,3 +49,16 @@ pure_shear.load_direction = 0
 pure_shear.u_r = 0.125
 pure_shear.end_t = 9e-3
 pure_shear.num_iterations = 500
+
+name = "SpeedTest"
+speed_test = Preset(name)
+speed_test.output_directory = pathlib.Path("result") / name
+speed_test.u_r = 0.02
+speed_test.end_t = 2e-4
+speed_test.num_iterations = 20
+
+speed_test.verbose = False
+speed_test.out_vtk = False
+speed_test.out_xdmf = False
+speed_test.animation = False
+speed_test.screenshot = False

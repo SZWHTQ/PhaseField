@@ -2,7 +2,8 @@ import os
 import subprocess
 
 # 定义需要测试的核心数
-core_counts = [2, 4, 6, 8, 12, 16, 20, 24, 28, 32]
+# core_counts = [2, 4, 6, 8, 12, 16, 20, 24, 28, 32]
+core_counts = [4]
 
 # 创建日志目录
 log_dir = "log"

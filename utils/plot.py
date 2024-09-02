@@ -107,7 +107,7 @@ ax1.legend(loc="upper left", frameon=True, title="Categories", ncol=2)
 ax1.set_xlabel("Core Number")
 ax1.set_ylabel("Time (s)")
 ax1.set_xlim(1, 32)
-ax1.set_xticks([1, 2, 4, 6, 8, 12, 16, 24, 32])
+ax1.set_xticks([1, 2, 4, 6, 8, 12, 16, 20, 24, 28, 32])
 
 # 在指定区域添加文本
 ax1.text(
@@ -121,7 +121,7 @@ ax1.text(
 )
 ax1.text(
     12.5,
-    np.max(smoothed_data) * 0.8,
+    np.max(smoothed_data) * 0.75,
     "Efficient\nCores",
     fontsize=16,
     color="black",
@@ -130,7 +130,7 @@ ax1.text(
 )
 ax1.text(
     20,
-    np.max(smoothed_data) * 0.7,
+    np.max(smoothed_data) * 0.6,
     "Hyper\nThreading",
     fontsize=16,
     color="black",
