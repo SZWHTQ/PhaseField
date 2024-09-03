@@ -28,12 +28,10 @@ import sys
 from pathlib import Path
 
 import Presets
-import ConstitutiveRelation as cr
 
-preset = Presets.high_loading_rate
+preset = Presets.ziaei_rad_pure_shear
 material = preset.material
-
-constitutive = cr.Elastic_BourdinFrancfort2008(preset.material)
+constitutive = preset.constitutive
 
 out_dir = Path(preset.output_directory)
 
@@ -55,7 +53,7 @@ length = 100
 mesh = dfx.mesh.create_rectangle(
     comm,
     [np.array([-length / 2, -length / 2]), np.array([length / 2, length / 2])],
-    [400, 400],
+    [preset.mesh_x, preset.mesh_y],
     cell_type=dfx.mesh.CellType.quadrilateral,
 )
 
@@ -124,8 +122,8 @@ def getAcceleration(u, u_old, u_old2, dt, dt_old):
 dt = dfx.fem.Constant(mesh, dfx.default_scalar_type(1))
 dt_old = dfx.fem.Constant(mesh, dfx.default_scalar_type(1))
 
-U = 0.5 * (displacement + displacement_old)
 if constitutive.linear:
+    U = 0.5 * (displacement + displacement_old)
     a = getAcceleration(u, displacement_old, displacement_old2, dt, dt_old)
     f = dfx.fem.Constant(mesh, dfx.default_scalar_type((0,) * topology_dim))
     displacement_weak_form = (
@@ -135,7 +133,6 @@ if constitutive.linear:
     ) * ufl.dx
     displacement_a = dfx.fem.form(ufl.lhs(displacement_weak_form))
     displacement_L = dfx.fem.form(ufl.rhs(displacement_weak_form))
-
 else:
     a = getAcceleration(displacement, displacement_old, displacement_old2, dt, dt_old)
     f = dfx.fem.Constant(mesh, dfx.default_scalar_type((0,) * topology_dim))
@@ -150,9 +147,9 @@ crack_phase_weak_form = (
     material.eta * (p - crack_phase_old) * q * ufl.dx
     - dt
     * (
-        2 * (1 - crack_phase_old) * energy_history * q
-        - material.Gc / material.lc * crack_phase_old * q
-        - material.Gc * material.lc * ufl.inner(ufl.nabla_grad(P), ufl.nabla_grad(q))
+        2 * (1 - p) * energy_history * q
+        - material.Gc / material.lc * p * q
+        - material.Gc * material.lc * ufl.inner(ufl.nabla_grad(p), ufl.nabla_grad(q))
     )
     * ufl.dx
 )
@@ -189,9 +186,10 @@ displacement_bcs = [bc_bot, bc_top]
 
 # Crack phase boundary conditions
 def is_crack(x):
+    y_limit = (length / 2 / preset.mesh_y) * 1.01
     return np.logical_and(
-        np.less(np.abs(x[1]), 1e-03),
-        np.less_equal(x[0], 0),
+        np.less(np.abs(x[1]), y_limit),
+        np.less_equal(x[0], -length / 2 + preset.crack_length),
     )
 
 
@@ -232,7 +230,7 @@ else:
     displacement_solver = NewtonSolver(comm, displacement_problem)
 
     displacement_solver.convergence_criterion = "incremental"
-    displacement_solver.rtol = 1e-6
+    displacement_solver.rtol = 1e-8
     displacement_solver.report = True
 
     ksp = displacement_solver.krylov_solver
@@ -257,7 +255,8 @@ crack_phase_problem = petsc.LinearProblem(
 
 
 # %% Output, iterative scheme and tools
-save_interval = preset.num_iterations // 20
+if preset.save_interval is None:
+    preset.save_interval = preset.num_iterations // 20
 # save_interval = 1
 delta_t = preset.end_t / preset.num_iterations
 
@@ -500,7 +499,7 @@ for idx, t in enumerate(T):
     timers["update"].pause()
 
     timers["save"].resume()
-    if idx == 0 or (idx + 1) % save_interval == 0 or (idx + 1) == len(T):
+    if idx == 0 or (idx + 1) % preset.save_interval == 0 or (idx + 1) == len(T):
         if preset.out_vtk:
             pvd_file.write_function(_displacement, t)
             pvd_file.write_function(_crack_phase, t)
