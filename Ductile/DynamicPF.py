@@ -60,7 +60,6 @@ mesh = dfx.mesh.create_rectangle(
 topology_dim = mesh.topology.dim
 boundary_dim = topology_dim - 1
 
-
 # %% Define function spaces
 V = dfx.fem.functionspace(mesh, ("CG", 1, (topology_dim,)))
 S = dfx.fem.functionspace(mesh, ("CG", 1))
@@ -80,10 +79,13 @@ crack_phase_old = dfx.fem.Function(S)  # d_k
 
 energy_history = dfx.fem.Function(DS)  # H_{k+1}
 
+
+equivalent_plastic_strain = dfx.fem.Function(S)  # ε_{k+1}^{p}
+strain_rate = dfx.fem.Function(S)  # \dot{ε}_{k+1}
+
 displacement.name = "Displacement"
 crack_phase.name = "Crack_Phase"
 energy_history.name = "Energy_History"
-
 
 # %% Define constitutive relations
 energy_history_expr = dfx.fem.Expression(
@@ -99,16 +101,16 @@ energy_history_expr = dfx.fem.Expression(
 )
 
 
-subV = dfx.fem.functionspace(mesh, ("CG", 1, (topology_dim,)))
-subS = dfx.fem.functionspace(mesh, ("CG", 1))
+V_vis = dfx.fem.functionspace(mesh, ("CG", 1, (topology_dim,)))
+S_vis = dfx.fem.functionspace(mesh, ("CG", 1))
 
-_displacement = dfx.fem.Function(subV)
-_crack_phase = dfx.fem.Function(subS)
-_energy_history = dfx.fem.Function(subS)
+displacement_vis = dfx.fem.Function(V_vis)
+crack_phase_vis = dfx.fem.Function(S_vis)
+energy_history_vis = dfx.fem.Function(S_vis)
 
-_displacement.name = "Displacement"
-_crack_phase.name = "Crack Phase"
-_energy_history.name = "Energy History"
+displacement_vis.name = "Displacement"
+crack_phase_vis.name = "Crack Phase"
+energy_history_vis.name = "Energy History"
 
 
 # %% Construct the weak form
@@ -333,17 +335,19 @@ if preset.out_xdmf:
 
 # %% Create visualization
 if preset.animation and have_pyvista:
-    _displacement.interpolate(displacement)
-    _crack_phase.interpolate(crack_phase)
+    displacement_vis.interpolate(displacement)
+    crack_phase_vis.interpolate(crack_phase)
 
     points_num = mesh.geometry.x.shape[0]
 
     grid = pv.UnstructuredGrid(*dfx.plot.vtk_mesh(mesh))
-    grid["Crack Phase"] = _crack_phase.x.array
+    grid["Crack Phase"] = crack_phase_vis.x.array
     grid.set_active_scalars("Crack Phase")
 
     values = np.zeros((points_num, 3))
-    values[:, :topology_dim] = _displacement.x.array.reshape(points_num, topology_dim)
+    values[:, :topology_dim] = displacement_vis.x.array.reshape(
+        points_num, topology_dim
+    )
     grid["Displacement"] = values
 
     warped = grid.warp_by_vector("Displacement", factor=warp_factor)
@@ -462,15 +466,15 @@ for idx, t in enumerate(T):
     timers["verbose"].pause()
 
     if preset.animation or preset.out_vtk or preset.out_xdmf:
-        _displacement.interpolate(displacement)
-        _crack_phase.interpolate(crack_phase)
-        _energy_history.interpolate(energy_history)
+        displacement_vis.interpolate(displacement)
+        crack_phase_vis.interpolate(crack_phase)
+        energy_history_vis.interpolate(energy_history)
 
     timers["plot"].resume()
     if preset.animation and have_pyvista:
-        warped["Crack Phase"][:] = _crack_phase.x.array
+        warped["Crack Phase"][:] = crack_phase_vis.x.array
 
-        grid["Displacement"][:, :topology_dim] = _displacement.x.array.reshape(
+        grid["Displacement"][:, :topology_dim] = displacement_vis.x.array.reshape(
             points_num, topology_dim
         )
 
@@ -501,13 +505,13 @@ for idx, t in enumerate(T):
     timers["save"].resume()
     if idx == 0 or (idx + 1) % preset.save_interval == 0 or (idx + 1) == len(T):
         if preset.out_vtk:
-            pvd_file.write_function(_displacement, t)
-            pvd_file.write_function(_crack_phase, t)
-            pvd_file.write_function(_energy_history, t)
+            pvd_file.write_function(displacement_vis, t)
+            pvd_file.write_function(crack_phase_vis, t)
+            pvd_file.write_function(energy_history_vis, t)
         if preset.out_xdmf:
-            xdmf_file.write_function(_displacement, t)
-            xdmf_file.write_function(_crack_phase, t)
-            xdmf_file.write_function(_energy_history, t)
+            xdmf_file.write_function(displacement_vis, t)
+            xdmf_file.write_function(crack_phase_vis, t)
+            xdmf_file.write_function(energy_history_vis, t)
         if rank == host:
             print(f"Saved at {t:.3e}. Elapsed: {timer}, total elapsed: {total_timer}\n")
             sys.stdout.flush()

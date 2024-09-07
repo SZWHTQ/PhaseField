@@ -109,17 +109,3 @@ class Elastic_AmorMarigo2009(ConstitutiveRelation):
 
 #     def getStress(self, u):
 #         c = self.lame
-
-
-class ElasticPlastic(ConstitutiveRelation):
-    def __init__(self, material):
-        self.mu = material.mu
-
-    def getStrain(u):
-        return ufl.sym(ufl.grad(u))
-
-    def getStress(u):
-        return super().getStress()
-
-    def getStrainEnergyPositive(u):
-        return super().getStrainEnergyPositive()
