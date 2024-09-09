@@ -29,7 +29,7 @@ from pathlib import Path
 
 import Presets
 
-preset = Presets.ziaei_rad_pure_shear
+preset = Presets.high_loading_rate
 material = preset.material
 constitutive = preset.constitutive
 
@@ -80,12 +80,14 @@ crack_phase_old = dfx.fem.Function(S)  # d_k
 energy_history = dfx.fem.Function(DS)  # H_{k+1}
 
 
-equivalent_plastic_strain = dfx.fem.Function(S)  # ε_{k+1}^{p}
-strain_rate = dfx.fem.Function(S)  # \dot{ε}_{k+1}
+temperature = dfx.fem.Constant(mesh, dfx.default_scalar_type(298))
 
 displacement.name = "Displacement"
 crack_phase.name = "Crack_Phase"
 energy_history.name = "Energy_History"
+
+displacement.x.array[:] = 0.0
+crack_phase.x.array[:] = 0.0
 
 # %% Define constitutive relations
 energy_history_expr = dfx.fem.Expression(
@@ -129,8 +131,10 @@ if constitutive.linear:
     a = getAcceleration(u, displacement_old, displacement_old2, dt, dt_old)
     f = dfx.fem.Constant(mesh, dfx.default_scalar_type((0,) * topology_dim))
     displacement_weak_form = (
-        material.rho * ufl.inner(a, v)
-        + ufl.inner(constitutive.getStress(u, crack_phase), ufl.grad(v))
+        material.mass_density * ufl.inner(a, v)
+        + ufl.inner(
+            constitutive.getStress(u, crack_phase, temperature, dt), ufl.grad(v)
+        )
         - ufl.inner(f, v)
     ) * ufl.dx
     displacement_a = dfx.fem.form(ufl.lhs(displacement_weak_form))
@@ -139,8 +143,11 @@ else:
     a = getAcceleration(displacement, displacement_old, displacement_old2, dt, dt_old)
     f = dfx.fem.Constant(mesh, dfx.default_scalar_type((0,) * topology_dim))
     displacement_weak_form = (
-        material.rho * ufl.inner(a, v)
-        + ufl.inner(constitutive.getStress(displacement, crack_phase), ufl.grad(v))
+        material.mass_density * ufl.inner(a, v)
+        + ufl.inner(
+            constitutive.getStress(displacement, crack_phase, temperature, dt),
+            ufl.grad(v),
+        )
         - ufl.inner(f, v)
     ) * ufl.dx
 
@@ -341,8 +348,15 @@ if preset.animation and have_pyvista:
     points_num = mesh.geometry.x.shape[0]
 
     grid = pv.UnstructuredGrid(*dfx.plot.vtk_mesh(mesh))
+    # eq_stress = dfx.fem.Expression(
+    #     constitutive.getEquivalentStress(displacement, crack_phase),
+    #     V_vis.element.interpolation_points(),
+    # )
+    # crack_phase_vis.interpolate(eq_stress)
     grid["Crack Phase"] = crack_phase_vis.x.array
+    # grid["Displacement"] = displacement_vis.x.array
     grid.set_active_scalars("Crack Phase")
+    # grid.set_active_scalars("Displacement")
 
     values = np.zeros((points_num, 3))
     values[:, :topology_dim] = displacement_vis.x.array.reshape(
@@ -472,7 +486,9 @@ for idx, t in enumerate(T):
 
     timers["plot"].resume()
     if preset.animation and have_pyvista:
+        # crack_phase_vis.interpolate(eq_stress)
         warped["Crack Phase"][:] = crack_phase_vis.x.array
+        # warped["Displacement"][:] = displacement_vis.x.array
 
         grid["Displacement"][:, :topology_dim] = displacement_vis.x.array.reshape(
             points_num, topology_dim
@@ -485,6 +501,7 @@ for idx, t in enumerate(T):
             for i in range(1, comm.Get_size()):
                 warp_ = comm.recv(source=i)
                 warps[i - 1]["Crack Phase"][:] = warp_["Crack Phase"]
+                # warps[i - 1]["Displacement"][:] = warp_["Displacement"]
                 warps[i - 1].points[:, :] = warp_.points
             plotter.add_text(f"Time: {t:.3e}", font_size=12, name="time_label")
             plotter.app.processEvents()

@@ -1,6 +1,4 @@
 import ufl
-import ufl.algebra
-import ufl.algorithms
 
 from Material import Brittle, JohnsonCook
 
@@ -10,13 +8,13 @@ class ConstitutiveRelation:
         self.name = name
         self.linear = linear
 
-    def getStrain(u):
+    def getStrain(self, u):
         raise NotImplementedError
 
-    def getStress(u):
+    def getStress(self, u):
         raise NotImplementedError
 
-    def getStrainEnergyPositive(u):
+    def getStrainEnergyPositive(self, u):
         raise NotImplementedError
 
     def __str__(self):
@@ -27,9 +25,6 @@ class ConstitutiveRelation:
 
 
 def macaulayBrackets(x):
-    # def ufl_abs(x):
-    #     return ufl.sqrt(x**2)
-
     positive = (x + abs(x)) / 2
     negative = x - positive
     return positive, negative
@@ -98,43 +93,82 @@ class Elastic_AmorMarigo2009(ConstitutiveRelation):
         )
 
 
-# class Elastic_MieheWelschinger2010(ConstitutiveRelation):
-#     def __init__(self, material: Brittle):
-#         super().__init__(name="Miehe Welschinger 2010", linear=False)
-#         self.mu = material.mu
-#         self.lame = material.lame
-
-#     def getStrain(self, u):
-#         return ufl.sym(ufl.grad(u))
-
-#     def getStress(self, u):
-#         c = self.lame
-
-
-class ElasticPlastic(ConstitutiveRelation):
+class Elastoplastic(ConstitutiveRelation):
     def __init__(self, material: JohnsonCook):
+        super().__init__(name="Elastoplastic")
+
         self.material = material
 
-    def getStrain(u):
+        # self.delta_time = 1
+
+        self.equivalent_plastic_strain = 0.0
+        self.strain_rate = 0.0
+
+    def getStrain(self, u):
         return ufl.sym(ufl.grad(u))
 
-    def getStress(self, u, d, equivalent_plastic_strain, strain_rate, temperature):
+    def getEquivalentStress(self, u, d):
         stress = (1 - d) ** 2 * (
-            self.lame * ufl.tr(self.getStrain(u)) * ufl.Identity(len(u))
-            + 2.0 * self.mu * self.getStrain(u)
+            self.material.lame * ufl.tr(self.getStrain(u)) * ufl.Identity(len(u))
+            + 2.0 * self.material.shear_modulus * self.getStrain(u)
         )
+        deviatoric_stress = ufl.dev(stress)
+        return ufl.sqrt(3 / 2 * ufl.inner(deviatoric_stress, deviatoric_stress) + 0.1)
+        # return 3 / 2 * ufl.inner(deviatoric_stress, deviatoric_stress)
 
-        equivalent_stress = ufl.sqrt(
-            3.0 / 2.0 * ufl.inner(ufl.dev(stress), ufl.dev(stress))
-        )
-
+    def getStress(self, u, d, T, delta_time):
         yield_stress = self.material.getYieldStress(
-            equivalent_plastic_strain, strain_rate, temperature, d
+            self.equivalent_plastic_strain, self.strain_rate, temperature=T, damage=d
         )
-        
-        
+
+        hardening_modulus = self.material.getHardeningModulus(
+            self.equivalent_plastic_strain, self.strain_rate, temperature=T, damage=d
+        )
+
+        stress = (1 - d) ** 2 * (
+            self.material.lame * ufl.tr(self.getStrain(u)) * ufl.Identity(len(u))
+            + 2.0 * self.material.shear_modulus * self.getStrain(u)
+        )
+
+        mean_stress = ufl.tr(stress) / 3.0
+        deviatoric_stress = ufl.dev(stress)
+        # equivalent_stress = ufl.sqrt(
+        #     3 / 2 * ufl.inner(deviatoric_stress, deviatoric_stress)
+        # )
+        equivalent_stress = self.getEquivalentStress(u, d)
+        stress_diff, _ = macaulayBrackets(equivalent_stress - yield_stress)
+
+        delta_equivalent_plastic_strain = stress_diff / (
+            3.0 * self.material.shear_modulus + hardening_modulus
+        )
+
+        # if equivalent_stress > 0:
+        #     delta_plastic_strain = (
+        #         (3.0 / 2.0) ** 0.5
+        #         * delta_equivalent_plastic_strain
+        #         * deviatoric_stress
+        #         / equivalent_stress
+        #     )
+        # else:
+        #     delta_plastic_strain = 0.0 * deviatoric_stress
+
+        new_yield = yield_stress + hardening_modulus * delta_equivalent_plastic_strain
+        factor = new_yield / (
+            new_yield
+            + 3 * self.material.shear_modulus * delta_equivalent_plastic_strain
+        )
+
+        stress = deviatoric_stress * factor + mean_stress * ufl.Identity(len(u))
+
+        self.equivalent_plastic_strain += delta_equivalent_plastic_strain
+        self.strain_rate = delta_equivalent_plastic_strain / delta_time
+
+        return stress
 
     def getStrainEnergyPositive(self, u, _):
-        return 0.5 * self.lame * ufl.tr(self.getStrain(u)) ** 2 + self.mu * ufl.inner(
-            self.getStrain(u), self.getStrain(u)
+        c = self.material.lame / 2 + self.material.shear_modulus / 3
+        tr_epsilon_pos, _ = macaulayBrackets(ufl.tr(self.getStrain(u)))
+
+        return c * tr_epsilon_pos**2 + self.material.shear_modulus * ufl.inner(
+            ufl.dev(self.getStrain(u)), ufl.dev(self.getStrain(u))
         )
