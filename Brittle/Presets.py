@@ -44,6 +44,7 @@ high_loading_rate.output_directory = pathlib.Path("result") / name
 high_loading_rate.u_r = 0.4
 high_loading_rate.end_t = 4e-3
 high_loading_rate.num_iterations = 500
+high_loading_rate.crack_length = 25
 high_loading_rate.constitutive = cr.Elastic_BourdinFrancfort2008(mat)
 
 name = "LowLoadingRate"
@@ -75,6 +76,7 @@ nl_high_loading_rate.output_directory = pathlib.Path("result/Nonlinear") / name
 nl_high_loading_rate.u_r = 0.4
 nl_high_loading_rate.end_t = 4e-3
 nl_high_loading_rate.num_iterations = 500
+nl_high_loading_rate.crack_length = 25
 nl_high_loading_rate.constitutive = cr.Elastic_AmorMarigo2009(mat)
 
 name = "LowLoadingRate"

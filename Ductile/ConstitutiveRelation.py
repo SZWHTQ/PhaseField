@@ -103,20 +103,29 @@ class Elastoplastic(ConstitutiveRelation):
 
         self.equivalent_plastic_strain = 0.0
         self.strain_rate = 0.0
+        self.plastic_work = 0.0
 
     def getStrain(self, u):
         return ufl.sym(ufl.grad(u))
 
     def getEquivalentStress(self, u, d):
-        stress = (1 - d) ** 2 * (
-            self.material.lame * ufl.tr(self.getStrain(u)) * ufl.Identity(len(u))
-            + 2.0 * self.material.shear_modulus * self.getStrain(u)
-        )
+        # stress = (1 - d) ** 2 * (
+        #     self.material.lame * ufl.tr(self.getStrain(u)) * ufl.Identity(len(u))
+        #     + 2.0
+        c = self.material.lame + 2 * self.material.shear_modulus / 3
+        tr_epsilon_pos, tr_epsilon_neg = macaulayBrackets(ufl.tr(self.getStrain(u)))
+
+        sigma_p = c * tr_epsilon_pos * ufl.Identity(
+            len(u)
+        ) + 2 * self.material.shear_modulus * ufl.dev(self.getStrain(u))
+        sigma_n = c * tr_epsilon_neg * ufl.Identity(len(u))
+
+        stress = (1 - d) ** 2 * sigma_p + sigma_n
         deviatoric_stress = ufl.dev(stress)
-        return ufl.sqrt(3 / 2 * ufl.inner(deviatoric_stress, deviatoric_stress) + 0.1)
+        return ufl.sqrt(3 / 2 * ufl.inner(deviatoric_stress, deviatoric_stress) + 1e-6)
         # return 3 / 2 * ufl.inner(deviatoric_stress, deviatoric_stress)
 
-    def getStress(self, u, d, T, delta_time):
+    def getStress(self, u, d, T, delta_time=None):
         yield_stress = self.material.getYieldStress(
             self.equivalent_plastic_strain, self.strain_rate, temperature=T, damage=d
         )
@@ -160,8 +169,13 @@ class Elastoplastic(ConstitutiveRelation):
 
         stress = deviatoric_stress * factor + mean_stress * ufl.Identity(len(u))
 
-        self.equivalent_plastic_strain += delta_equivalent_plastic_strain
-        self.strain_rate = delta_equivalent_plastic_strain / delta_time
+        if delta_time:
+            self.equivalent_plastic_strain += delta_equivalent_plastic_strain
+            self.strain_rate = delta_equivalent_plastic_strain / delta_time
+            delta_plastic_work = (
+                0.5 * (yield_stress + new_yield) * delta_equivalent_plastic_strain
+            )
+            self.plastic_work += delta_plastic_work
 
         return stress
 

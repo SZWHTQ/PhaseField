@@ -29,7 +29,7 @@ from pathlib import Path
 
 import Presets
 
-preset = Presets.high_loading_rate
+preset = Presets.ziaei_rad_high_loading_rate
 material = preset.material
 constitutive = preset.constitutive
 
@@ -79,7 +79,6 @@ crack_phase_old = dfx.fem.Function(S)  # d_k
 
 energy_history = dfx.fem.Function(DS)  # H_{k+1}
 
-
 temperature = dfx.fem.Constant(mesh, dfx.default_scalar_type(298))
 
 displacement.name = "Displacement"
@@ -93,7 +92,9 @@ crack_phase.x.array[:] = 0.0
 energy_history_expr = dfx.fem.Expression(
     ufl.conditional(
         ufl.gt(
-            constitutive.getStrainEnergyPositive(displacement, crack_phase),
+            constitutive.getStrainEnergyPositive(displacement, crack_phase)
+            + 0.1 * constitutive.plastic_work
+            - 0.1 * constitutive.material.W0,
             energy_history,
         ),
         constitutive.getStrainEnergyPositive(displacement, crack_phase),
@@ -102,7 +103,7 @@ energy_history_expr = dfx.fem.Expression(
     DS.element.interpolation_points(),
 )
 
-
+W_vis = dfx.fem.functionspace(mesh, ("CG", 1, (topology_dim, topology_dim)))
 V_vis = dfx.fem.functionspace(mesh, ("CG", 1, (topology_dim,)))
 S_vis = dfx.fem.functionspace(mesh, ("CG", 1))
 
@@ -110,9 +111,18 @@ displacement_vis = dfx.fem.Function(V_vis)
 crack_phase_vis = dfx.fem.Function(S_vis)
 energy_history_vis = dfx.fem.Function(S_vis)
 
+stress = dfx.fem.Function(W_vis)
+
 displacement_vis.name = "Displacement"
 crack_phase_vis.name = "Crack Phase"
 energy_history_vis.name = "Energy History"
+
+stress.name = "Stress"
+
+stress_expr = dfx.fem.Expression(
+    constitutive.getStress(displacement, crack_phase, temperature),
+    W_vis.element.interpolation_points(),
+)
 
 
 # %% Construct the weak form
@@ -483,6 +493,7 @@ for idx, t in enumerate(T):
         displacement_vis.interpolate(displacement)
         crack_phase_vis.interpolate(crack_phase)
         energy_history_vis.interpolate(energy_history)
+        stress.interpolate(stress_expr)
 
     timers["plot"].resume()
     if preset.animation and have_pyvista:
@@ -525,10 +536,12 @@ for idx, t in enumerate(T):
             pvd_file.write_function(displacement_vis, t)
             pvd_file.write_function(crack_phase_vis, t)
             pvd_file.write_function(energy_history_vis, t)
+            pvd_file.write_function(stress, t)
         if preset.out_xdmf:
             xdmf_file.write_function(displacement_vis, t)
             xdmf_file.write_function(crack_phase_vis, t)
             xdmf_file.write_function(energy_history_vis, t)
+            xdmf_file.write_function(stress, t)
         if rank == host:
             print(f"Saved at {t:.3e}. Elapsed: {timer}, total elapsed: {total_timer}\n")
             sys.stdout.flush()

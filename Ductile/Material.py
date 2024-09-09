@@ -46,6 +46,7 @@ class JohnsonCook:
         self.Gc = 30  # Critical energy release rate
         self.lc = 2e-2  # Characteristic length
         self.eta = 5e-5  # Crack phase viscosity parameter
+        self.W0 = 15  # Crack phase energy threshold
 
     def getYieldStress(
         self, equivalent_plastic_strain, strain_rate, temperature, damage

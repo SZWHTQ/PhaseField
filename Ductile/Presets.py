@@ -27,7 +27,7 @@ class Preset:
 
         self.material = material
 
-        self.constitutive = cr.ConstitutiveRelation()
+        self.constitutive = cr.Elastoplastic(Material.JohnsonCook())
 
     def __str__(self):
         return self.__name
@@ -42,6 +42,7 @@ high_loading_rate.output_directory = pathlib.Path("result") / name
 high_loading_rate.u_r = 0.4
 high_loading_rate.end_t = 4e-3
 high_loading_rate.num_iterations = 200
+high_loading_rate.crack_length = 25
 high_loading_rate.constitutive = cr.Elastoplastic(high_loading_rate.material)
 
 name = "LowLoadingRate"
@@ -97,8 +98,8 @@ ziaei_rad_high_loading_rate.output_directory = pathlib.Path("result/ZiaeiRad") /
 )
 ziaei_rad_high_loading_rate.mesh_x = 151
 ziaei_rad_high_loading_rate.mesh_y = 151
-ziaei_rad_high_loading_rate.u_r = 0.2
-ziaei_rad_high_loading_rate.end_t = 2e-3
+ziaei_rad_high_loading_rate.u_r = 0.4
+ziaei_rad_high_loading_rate.end_t = 4e-3
 ziaei_rad_high_loading_rate.crack_length = 25
 ziaei_rad_high_loading_rate.num_iterations = 200
 ziaei_rad_high_loading_rate.material.lc = 1
