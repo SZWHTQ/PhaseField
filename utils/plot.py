@@ -5,7 +5,7 @@ from scipy.interpolate import make_interp_spline
 from scipy.optimize import minimize
 
 plt.rcParams["font.family"] = "JetBrainsMono NF"
-plt.rcParams["font.size"] = 12
+plt.rcParams["font.size"] = 24
 
 # 读取CSV文件
 df = pd.read_csv("time.csv")
@@ -91,7 +91,7 @@ for i in range(data.shape[0]):
     smoothed_data.append(spl_category(x_new))
 
 # 绘制堆积图
-fig, ax1 = plt.subplots(figsize=(10, 7))
+fig, ax1 = plt.subplots(figsize=(16, 9))
 colors = ["#8BBDE0", "#F9A490", "#B1CAA2", "#E2CCFF", "#F3E4CF"]
 ax1.stackplot(x_new, smoothed_data, labels=categories, colors=colors)
 
@@ -101,20 +101,20 @@ ax1.axvline(x=16, color="#f8ae81", linestyle="--", linewidth=2)
 ax1.axvline(x=24, color="#85a8ff", linestyle="--", linewidth=2)
 
 # 添加图例
-ax1.legend(loc="upper left", frameon=True, title="Categories", ncol=2)
+ax1.legend(loc="upper left", frameon=True, title="Categories", ncol=2, fontsize=18)
 
 # 设置第一个y轴标题和标签
 ax1.set_xlabel("Core Number")
 ax1.set_ylabel("Time (s)")
 ax1.set_xlim(1, 32)
 ax1.set_xticks([1, 2, 4, 6, 8, 12, 16, 20, 24, 28, 32])
+ax1.set_yticks(np.linspace(0, 20, 5))
 
 # 在指定区域添加文本
 ax1.text(
     4.5,
     np.max(smoothed_data) * 0.9,
     "Performance\nCores",
-    fontsize=16,
     color="black",
     ha="center",
     va="center",
@@ -123,7 +123,6 @@ ax1.text(
     12.5,
     np.max(smoothed_data) * 0.75,
     "Efficient\nCores",
-    fontsize=16,
     color="black",
     ha="center",
     va="center",
@@ -132,16 +131,15 @@ ax1.text(
     20,
     np.max(smoothed_data) * 0.6,
     "Hyper\nThreading",
-    fontsize=16,
     color="black",
     ha="center",
     va="center",
 )
 ax1.text(
-    27.3,
-    -1.77,
+    28,
+    -2,
     r"$^*$13th Gen Intel$^{\mathrm{R}}$ Core$^{\mathrm{TM}}$ i7-13790F",
-    fontsize=9,
+    fontsize=14,
     color="black",
     ha="center",
     va="center",
@@ -160,7 +158,7 @@ ax2.plot(
 
 # 设置第二个y轴标题和标签
 ax2.set_ylabel("Speedup")
-ax2.legend(loc="upper right", frameon=True)
+ax2.legend(loc="upper right", frameon=True, fontsize=18)
 ax2.set_ylim(0, 4)
 ax2.set_yticks([1, 2, 3])
 

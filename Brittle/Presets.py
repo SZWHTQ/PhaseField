@@ -8,8 +8,8 @@ class Preset:
     def __init__(self, name="Default", material=Material.Brittle()):
         self.__name = name
 
-        self.mesh_x = 100
-        self.mesh_y = 100
+        self.mesh_x = 400
+        self.mesh_y = 400
 
         self.output_directory = pathlib.Path("result/Output")
         self.load_direction = 1  # 1 for y-axis uniaxial tension, 0 for pure shear
