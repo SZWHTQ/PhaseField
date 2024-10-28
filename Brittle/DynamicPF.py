@@ -43,6 +43,7 @@ rank = comm.Get_rank()
 if rank == host:
     print(f"MPI size: {comm.Get_size()}")
     print(f"Using {constitutive}")
+    print(f"Phase field characterized length: {preset.material.lc}")
 
     sys.stdout.flush()
 
@@ -439,7 +440,7 @@ for idx, t in enumerate(T):
     timers["crack_phase_solve"].pause()
 
     timers["normalize"].resume()
-    crack_phase.x.array[:] = np.clip(crack_phase.x.array, crack_phase_old.x.array, 1)
+    # crack_phase.x.array[:] = np.clip(crack_phase.x.array, crack_phase_old.x.array, 1)
     timers["normalize"].pause()
 
     comm.Barrier()

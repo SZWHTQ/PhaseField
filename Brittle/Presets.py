@@ -5,7 +5,7 @@ import ConstitutiveRelation as cr
 
 
 class Preset:
-    def __init__(self, name="Default", material=Material.Brittle()):
+    def __init__(self, name="Default", material=None):
         self.__name = name
 
         self.mesh_x = 400
@@ -25,7 +25,10 @@ class Preset:
         self.animation = True
         self.screenshot = True
 
-        self.material = material
+        if isinstance(material, Material.Brittle):
+            self.material = material
+        else:
+            self.material = Material.Brittle()
 
         self.constitutive = cr.ConstitutiveRelation()
 
@@ -38,7 +41,7 @@ default = Preset()
 # Linear presets
 name = "HighLoadingRate"
 mat = Material.Brittle()
-mat.lc = 0.5
+mat.lc = 1
 high_loading_rate = Preset(name, mat)
 high_loading_rate.output_directory = pathlib.Path("result") / name
 high_loading_rate.u_r = 0.4
@@ -48,7 +51,8 @@ high_loading_rate.crack_length = 25
 high_loading_rate.constitutive = cr.Elastic_BourdinFrancfort2008(mat)
 
 name = "LowLoadingRate"
-low_loading_rate = Preset("LowLoadingRate")
+low_loading_rate = Preset(name)
+low_loading_rate.material.lc = 0.5
 low_loading_rate.output_directory = pathlib.Path("result") / name
 low_loading_rate.u_r = 7.5e-2
 low_loading_rate.end_t = 7.5e-3
