@@ -1,22 +1,41 @@
 import numpy as np
 
-
 class Material:
     def __init__(self) -> None:
         pass
 
 
-class Brittle(Material):
+class Ductile(Material):
     def __init__(self):
+        ## Units: mm, s, kg, MPa
         # Mechanical properties
-        self.rho = 7e-6  # Mass Density
-        self.lame = 1.2e5  # Lamé coefficient
-        self.mu = 8e4  # Shear modulus
+        self.rho = 7.8e-6  # Mass Density, kg/mm^3
+        self.lame = 101163.333333333  # Lamé coefficient, MPa; bulk modulus = 150000 MPa
+        self.mu = 73255  # Shear modulus, MPa
 
         # Crack phase properties
-        self.Gc = 2.7  # Critical energy release rate
-        self.lc = 0.5  # Characteristic length
-        self.eta = 1e-3  # Crack phase viscosity parameter
+        self.Gc0 = 1000  # Initial critical fracture energy, KJ/m^2 (kg/s^2)
+        self.Gc_inf = 142.5  # Reduced critical fracture energy, KJ/m^2
+        self.omega_f = 42.325  # Saturation exponent (Fracture), -
+        self.eta_f = 6e-6  # Fracture viscosity parameter, MPa s
+        self.lf = 0.78125  # Fracture length scale, mm
+        self.wc = 180  # Critical work density, MPa
+
+        # Plastic phase properties
+        self.y0 = 343  # Initial yield stress, MPa
+        self.y_inf = 680  # Ultimate yield stress, MPa
+        self.omega_p = 16.93  # Saturation exponent (Plastic), -
+        self.h = 300  # Hardening modulus, MPa
+        self.eta_p = 6e-6  # Plastic viscosity parameter, MPa s
+        self.lp = 0.78125  # Plastic length scale, mm
+
+    def hardening(self, equivalent_plastic_strain):
+        return (
+            self.y_inf
+            - (self.y_inf - self.y0)
+            * np.exp(-self.omega_p * equivalent_plastic_strain)
+            + self.h * equivalent_plastic_strain
+        )
 
 
 # Johnson-Cook parameters
@@ -42,12 +61,6 @@ class JohnsonCook:
         self.melting_temperature = 1878.0
         self.reference_strain_rate = 1.0
 
-        # Crack phase properties
-        self.Gc = 30  # Critical energy release rate
-        self.lc = 2e-2  # Characteristic length
-        self.eta = 5e-5  # Crack phase viscosity parameter
-        self.W0 = 15  # Crack phase energy threshold
-
     def getYieldStress(
         self, equivalent_plastic_strain, strain_rate, temperature, damage
     ):
@@ -56,11 +69,8 @@ class JohnsonCook:
             * (1 + self.C * np.log(max(strain_rate, 1)))
             * (
                 1
-                - (
-                    (temperature - self.reference_temperature)
-                    / (self.melting_temperature - self.reference_temperature)
-                )
-                ** self.m
+                - (temperature - self.reference_temperature)
+                / (self.melting_temperature - self.reference_temperature)
             )
         ) * (1 - damage) ** 2
 
@@ -87,10 +97,7 @@ class JohnsonCook:
             * (1 + self.C * np.log(max(strain_rate, 1)))
             * (
                 1
-                - (
-                    (temperature - self.reference_temperature)
-                    / (self.melting_temperature - self.reference_temperature)
-                )
-                ** self.m
+                - (temperature - self.reference_temperature)
+                / (self.melting_temperature - self.reference_temperature)
             )
         ) * (1 - damage) ** 2

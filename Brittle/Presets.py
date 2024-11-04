@@ -1,4 +1,5 @@
 import pathlib
+# import warnings
 
 import Material
 import ConstitutiveRelation as cr
@@ -25,10 +26,22 @@ class Preset:
         self.animation = True
         self.screenshot = True
 
+<<<<<<< HEAD
         if isinstance(material, Material.Brittle):
             self.material = material
         else:
             self.material = Material.Brittle()
+=======
+        self.material = material
+        if self.material is None:
+            self.material = Material.Brittle()
+        else:
+            if isinstance(material, Material.Brittle):
+                self.material = material
+            else:
+                # warnings.warn("Material should be of type Brittle")
+                raise TypeError("Material should be of type Brittle")
+>>>>>>> Plastic
 
         self.constitutive = cr.ConstitutiveRelation()
 

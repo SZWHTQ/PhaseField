@@ -1,15 +1,16 @@
 import pathlib
+# import warnings
 
 import Material
 import ConstitutiveRelation as cr
 
 
 class Preset:
-    def __init__(self, name="Default", material=Material.JohnsonCook()):
+    def __init__(self, name="Default", material=None):
         self.__name = name
 
-        self.mesh_x = 400
-        self.mesh_y = 400
+        self.mesh_x = 256
+        self.mesh_y = 256
 
         self.output_directory = pathlib.Path("result/Output")
         self.load_direction = 1  # 1 for y-axis uniaxial tension, 0 for pure shear
@@ -25,7 +26,14 @@ class Preset:
         self.animation = True
         self.screenshot = True
 
-        self.material = material
+        if material is None:
+            self.material = Material.Ductile()
+        else:
+            if isinstance(material, Material.Ductile):
+                self.material = material
+            else:
+                # warnings.warn("Material should be of type Ductile")
+                raise TypeError("Material should be of type Ductile")
 
         self.constitutive = cr.Elastoplastic(Material.JohnsonCook())
 
@@ -37,9 +45,11 @@ default = Preset()
 
 # Linear presets
 name = "HighLoadingRate"
-high_loading_rate = Preset(name)
+mat = Material.Ductile()
+# mat.lf = 0.5
+high_loading_rate = Preset(name, mat)
 high_loading_rate.output_directory = pathlib.Path("result") / name
-high_loading_rate.u_r = 0.4
+high_loading_rate.u_r = 4
 high_loading_rate.end_t = 4e-3
 high_loading_rate.num_iterations = 200
 high_loading_rate.crack_length = 25
@@ -65,11 +75,11 @@ pure_shear.constitutive = cr.Elastoplastic(pure_shear.material)
 
 # Nonlinear presets
 name = "HighLoadingRate"
-mat = Material.Brittle()
-mat.lc = 0.5
+mat = Material.Ductile()
+# mat.lf = 0.5
 nl_high_loading_rate = Preset(name, mat)
 nl_high_loading_rate.output_directory = pathlib.Path("result/Nonlinear") / name
-nl_high_loading_rate.u_r = 0.4
+nl_high_loading_rate.u_r = 1
 nl_high_loading_rate.end_t = 4e-3
 nl_high_loading_rate.num_iterations = 500
 nl_high_loading_rate.constitutive = cr.Elastoplastic(mat)
@@ -102,8 +112,8 @@ ziaei_rad_high_loading_rate.u_r = 0.4
 ziaei_rad_high_loading_rate.end_t = 4e-3
 ziaei_rad_high_loading_rate.crack_length = 25
 ziaei_rad_high_loading_rate.num_iterations = 200
-ziaei_rad_high_loading_rate.material.lc = 1
-ziaei_rad_high_loading_rate.constitutive = cr.Elastoplastic(
+ziaei_rad_high_loading_rate.material.lf = 1
+ziaei_rad_high_loading_rate.constitutive = cr.Elastic_AmorMarigo2009(
     ziaei_rad_high_loading_rate.material
 )
 
@@ -116,8 +126,8 @@ ziaei_rad_low_loading_rate.mesh_y = 151
 ziaei_rad_low_loading_rate.u_r = 7e-2
 ziaei_rad_low_loading_rate.end_t = 7e-3
 ziaei_rad_low_loading_rate.num_iterations = 200
-ziaei_rad_low_loading_rate.material.lc = 1
-ziaei_rad_low_loading_rate.constitutive = cr.Elastoplastic(
+ziaei_rad_low_loading_rate.material.lf = 1
+ziaei_rad_low_loading_rate.constitutive = cr.Elastic_AmorMarigo2009(
     ziaei_rad_low_loading_rate.material
 )
 
@@ -131,8 +141,10 @@ ziaei_rad_pure_shear.load_direction = 0
 ziaei_rad_pure_shear.u_r = 0.125
 ziaei_rad_pure_shear.end_t = 9e-3
 ziaei_rad_pure_shear.num_iterations = 200
-ziaei_rad_pure_shear.material.lc = 1
-ziaei_rad_pure_shear.constitutive = cr.Elastoplastic(ziaei_rad_pure_shear.material)
+ziaei_rad_pure_shear.material.lf = 1
+ziaei_rad_pure_shear.constitutive = cr.Elastic_AmorMarigo2009(
+    ziaei_rad_pure_shear.material
+)
 
 
 name = "SpeedTest"
@@ -147,3 +159,15 @@ speed_test.out_vtk = False
 speed_test.out_xdmf = False
 speed_test.animation = False
 speed_test.screenshot = False
+
+
+name = "Miehe_2016_Shear"
+mild_steel = Material.Ductile()
+# E = 2e5 MPa, nu = 0.3
+mild_steel.lame = 115.384615385e3
+mild_steel.mu = 76.923076923e3
+mild_steel.y0 = 343
+miehe_2016_shear = Preset(name)
+miehe_2016_shear.material.lame = 115.384615385e3
+miehe_2016_shear.material.mu = 76.923076923e3
+miehe_2016_shear
