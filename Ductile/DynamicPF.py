@@ -126,6 +126,7 @@ topology_dim = mesh.topology.dim
 boundary_dim = topology_dim - 1
 
 # %% Define function spaces
+W = dfx.fem.functionspace(mesh, ("CG", 1, (topology_dim, topology_dim)))
 V = dfx.fem.functionspace(mesh, ("CG", 1, (topology_dim,)))
 S = dfx.fem.functionspace(mesh, ("CG", 1))
 DS = dfx.fem.functionspace(mesh, ("DG", 1))
@@ -150,6 +151,8 @@ energy_history = dfx.fem.Function(DS)  # H_{k+1}
 # Plastic field
 eq_plastic_strain = dfx.fem.Function(S)  # \alpha_{k+1}
 eq_plastic_strain_old = dfx.fem.Function(S)  # \alpha_{k+1}
+plastic_strain = dfx.fem.Function(W)  # \epsilon_{p,k+1}
+plastic_strain_rate = dfx.fem.Function(W)  # \dot{\epsilon}_{p,k+1}
 plastic_work = dfx.fem.Function(S)  # W_{k+1}
 plastic_work_inc = dfx.fem.Function(S)  # dW_{k+1}
 
@@ -172,17 +175,21 @@ eq_plastic_strain.name = "Equivalent_Plastic_Strain"
 #     )
 
 
+def elasticStrain():
+    return constitutive.getStrain(displacement) - plastic_strain
+
+
 def fractureDriveForce():
     return (
-        constitutive.getStrainEnergyPositive(displacement, _)
-        # + (
-        #     plastic_work
-        #     + material.y0
-        #     * material.lp**2
-        #     * ufl.inner(
-        #         ufl.nabla_grad(eq_plastic_strain), ufl.nabla_grad(eq_plastic_strain)
-        #     )
-        # )
+        constitutive.getElasticStrainEnergyPositive(elasticStrain())
+        + (
+            plastic_work
+            + material.y0
+            * material.lp**2
+            * ufl.inner(
+                ufl.nabla_grad(eq_plastic_strain), ufl.nabla_grad(eq_plastic_strain)
+            )
+        )
     ) / dfx.fem.Constant(mesh, dfx.default_scalar_type(material.wc)) - dfx.fem.Constant(
         mesh, 1.0
     )
@@ -199,6 +206,36 @@ energy_history_expr = dfx.fem.Expression(
         energy_history,
     ),
     DS.element.interpolation_points(),
+)
+
+
+def norm2DeviatoricStress():
+    return ufl.sqrt(
+        ufl.inner(
+            ufl.dev(elasticStrain()),
+            ufl.transpose(ufl.dev(elasticStrain())),
+        )
+    )
+
+
+plastic_epsilon_rate_expr = dfx.fem.Expression(
+    3
+    / 2
+    / material.eta_p
+    * ufl.max_value(
+        norm2DeviatoricStress()
+        - np.sqrt(2 / 3)
+        * (
+            material.hardening(eq_plastic_strain)
+            - material.y0
+            * material.lp**2
+            * ufl.nabla_div(ufl.nabla_grad(eq_plastic_strain))
+        ),
+        dfx.fem.Constant(mesh, 0.0),
+    )
+    / norm2DeviatoricStress()
+    * ufl.dev(constitutive.getElasticStress(elasticStrain())),
+    W.element.interpolation_points(),
 )
 
 plastic_work_inc_expr = dfx.fem.Expression(
@@ -288,21 +325,11 @@ crack_phase_weak_form = (
 crack_phase_a = dfx.fem.form(ufl.lhs(crack_phase_weak_form))
 crack_phase_L = dfx.fem.form(ufl.rhs(crack_phase_weak_form))
 
-
-def plasticObject(u):
-    return np.sqrt(3 / 2) * ufl.sqrt(
-        ufl.inner(
-            ufl.dev(constitutive.getStress(u, 0)),
-            ufl.dev(constitutive.getStress(u, 0)),
-        )
-    )
-
-
 eq_plastic_strain_weak_form = (
     material.eta_p * (eq_plastic_strain - eq_plastic_strain_old) * q * ufl.dx
     - dt
     * (
-        plasticObject(displacement) * q
+        np.sqrt(3 / 2) * norm2DeviatoricStress() * q
         - material.hardening(eq_plastic_strain) * q
         - material.y0
         * material.lp**2
@@ -712,7 +739,9 @@ for idx, t in enumerate(T):
     displacement_old2.x.array[:] = displacement_old.x.array
     displacement_old.x.array[:] = displacement.x.array
     crack_phase_old.x.array[:] = crack_phase.x.array
+    plastic_strain_rate.interpolate(plastic_epsilon_rate_expr)
     plastic_work_inc.interpolate(plastic_work_inc_expr)
+    plastic_strain.x.array[:] += plastic_strain_rate.x.array * delta_time
     plastic_work.x.array[:] += plastic_work_inc.x.array
     eq_plastic_strain_old.x.array[:] = eq_plastic_strain.x.array
     timers["update"].pause()

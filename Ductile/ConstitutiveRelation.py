@@ -14,6 +14,9 @@ class ConstitutiveRelation:
     def getStress(self, u):
         raise NotImplementedError
 
+    def getElasticStress(self, elastic_strain):
+        raise NotImplementedError
+
     def getStrainEnergyPositive(self, u):
         raise NotImplementedError
 
@@ -51,6 +54,21 @@ class Elastic_BourdinFrancfort2008(ConstitutiveRelation):
     def getStrainEnergyPositive(self, u, _):
         return 0.5 * self.lame * ufl.tr(self.getStrain(u)) ** 2 + self.mu * ufl.inner(
             self.getStrain(u), self.getStrain(u)
+        )
+
+    def getElasticStress(self, elastic_strain):
+        print(f"elastic_strain: {elastic_strain}")
+        print(f"len(elastic_strain): {len(elastic_strain)}")
+        print(f"len(elastic_strain[0]): {len(elastic_strain[0])}")
+        print(f"len(elastic_strain.x.array[0]): {len(elastic_strain.x.array[0])}")
+        return (
+            self.lame * ufl.tr(elastic_strain) * ufl.Identity(2)
+            + 2.0 * self.mu * elastic_strain
+        )
+
+    def getElasticStrainEnergyPositive(self, elastic_strain):
+        return 0.5 * self.lame * ufl.tr(elastic_strain) ** 2 + self.mu * ufl.tr(
+            ufl.dot(elastic_strain, elastic_strain)
         )
 
     # def getStrainEnergyPositive(self, u):
