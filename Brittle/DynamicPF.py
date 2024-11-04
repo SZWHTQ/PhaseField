@@ -29,11 +29,7 @@ from pathlib import Path
 
 import Presets
 
-<<<<<<< HEAD
 preset = Presets.nl_high_loading_rate
-=======
-preset = Presets.high_loading_rate
->>>>>>> Plastic
 material = preset.material
 constitutive = preset.constitutive
 

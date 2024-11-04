@@ -7,6 +7,8 @@ os.environ["OMP_NUM_THREADS"] = "1"
 import dolfinx as dfx
 import dolfinx.fem.petsc as petsc
 
+import gmsh
+
 from dolfinx.nls.petsc import NewtonSolver
 import ufl
 
@@ -31,7 +33,7 @@ from pathlib import Path
 
 import Presets
 
-preset = Presets.nl_high_loading_rate
+preset = Presets.miehe_2016_shear
 material = preset.material
 constitutive = preset.constitutive
 
@@ -51,13 +53,74 @@ if rank == host:
     dfx.log.set_output_file(str(out_dir / "solve.log"))
 
 # %% Create the mesh
-length = 100
-mesh = dfx.mesh.create_rectangle(
-    comm,
-    [np.array([-length / 2, -length / 2]), np.array([length / 2, length / 2])],
-    [preset.mesh_x, preset.mesh_y],
-    cell_type=dfx.mesh.CellType.quadrilateral,
-)
+length = preset.L
+# mesh = dfx.mesh.create_rectangle(
+#     comm,
+#     [np.array([-length / 2, -length / 2]), np.array([length / 2, length / 2])],
+#     [preset.mesh_x, preset.mesh_y],
+#     cell_type=dfx.mesh.CellType.quadrilateral,
+# )
+
+gmsh.initialize()
+if rank == host:
+    # Define the geometry
+    h_e = length / preset.mesh_x
+    max_element_size = h_e * 4
+    min_element_size = h_e / 2
+    gmsh.model.occ.addPoint(-length / 2, -length / 2, 0, max_element_size, 1)
+    gmsh.model.occ.addPoint(length / 2, -length / 2, 0, max_element_size, 2)
+    gmsh.model.occ.addPoint(length / 2, length / 2, 0, max_element_size, 3)
+    gmsh.model.occ.addPoint(-length / 2, length / 2, 0, max_element_size, 4)
+
+    gmsh.model.occ.addPoint(-length / 2, h_e / 2, 0, max_element_size, 5)
+    gmsh.model.occ.addPoint(0, h_e / 2, 0, min_element_size, 6)
+    gmsh.model.occ.addPoint(0, -h_e / 2, 0, min_element_size, 7)
+    gmsh.model.occ.addPoint(-length / 2, -h_e / 2, 0, max_element_size, 8)
+
+    gmsh.model.occ.addLine(1, 2, 1)
+    gmsh.model.occ.addLine(2, 3, 2)
+    gmsh.model.occ.addLine(3, 4, 3)
+    gmsh.model.occ.addLine(4, 5, 4)
+    gmsh.model.occ.addLine(5, 6, 5)
+    gmsh.model.occ.addLine(6, 7, 6)
+    gmsh.model.occ.addLine(7, 8, 7)
+    gmsh.model.occ.addLine(8, 1, 8)
+
+    gmsh.model.occ.addCurveLoop([1, 2, 3, 4, 5, 6, 7, 8], 1)
+
+    gmsh.model.occ.addPlaneSurface([1], 1)
+    gmsh.model.occ.synchronize()
+
+    gmsh.model.addPhysicalGroup(2, [1], 1, "SENS")
+
+    # Define a field to refine the mesh within the specified rectangular area
+    field_id = gmsh.model.mesh.field.add("Box")
+    gmsh.model.mesh.field.setNumber(
+        field_id, "VIn", min_element_size
+    )  # Smaller element size within the box
+    gmsh.model.mesh.field.setNumber(
+        field_id, "VOut", max_element_size
+    )  # Larger element size outside the box
+    gmsh.model.mesh.field.setNumber(field_id, "XMin", -0.05)
+    gmsh.model.mesh.field.setNumber(field_id, "XMax", 0.5)
+    gmsh.model.mesh.field.setNumber(field_id, "YMin", -0.1)
+    gmsh.model.mesh.field.setNumber(field_id, "YMax", 0.1)
+
+    gmsh.model.mesh.field.setAsBackgroundMesh(field_id)
+
+    # Configure the meshing algorithm
+    gmsh.option.setNumber("Mesh.RecombinationAlgorithm", 2)
+    gmsh.option.setNumber("Mesh.RecombineAll", 1)
+    gmsh.option.setNumber("Mesh.Algorithm", 8)
+
+    gmsh.model.mesh.generate(2)
+
+    gmsh.model.mesh.optimize("Netgen")
+
+    # gmsh.fltk.run()
+
+mesh, _, _ = dfx.io.gmshio.model_to_mesh(gmsh.model, comm, host, gdim=2)
+gmsh.finalize()
 
 topology_dim = mesh.topology.dim
 boundary_dim = topology_dim - 1
@@ -85,42 +148,70 @@ crack_phase_old = dfx.fem.Function(S)  # d_k
 energy_history = dfx.fem.Function(DS)  # H_{k+1}
 
 # Plastic field
-equivalent_plastic_strain = dfx.fem.Function(S)  # \alpha_{k+1}
-equivalent_plastic_strain_old = dfx.fem.Function(S)  # \alpha_{k+1}
+eq_plastic_strain = dfx.fem.Function(S)  # \alpha_{k+1}
+eq_plastic_strain_old = dfx.fem.Function(S)  # \alpha_{k+1}
 plastic_work = dfx.fem.Function(S)  # W_{k+1}
+plastic_work_inc = dfx.fem.Function(S)  # dW_{k+1}
 
 displacement.name = "Displacement"
 crack_phase.name = "Crack_Phase"
 energy_history.name = "Energy_History"
-equivalent_plastic_strain.name = "Equivalent_Plastic_Strain"
+eq_plastic_strain.name = "Equivalent_Plastic_Strain"
+
+
+# def fractureDriveForce():
+#     return (
+#         constitutive.getStrainEnergyPositive(displacement, crack_phase)
+#         + plastic_work
+#         + material.y0
+#         * material.lp**2
+#         * ufl.inner(
+#             ufl.nabla_grad(eq_plastic_strain), ufl.nabla_grad(eq_plastic_strain)
+#         )
+#         - dfx.fem.Constant(mesh, dfx.default_scalar_type(material.wc))
+#     )
+
+
+def fractureDriveForce():
+    return (
+        constitutive.getStrainEnergyPositive(displacement, _)
+        # + (
+        #     plastic_work
+        #     + material.y0
+        #     * material.lp**2
+        #     * ufl.inner(
+        #         ufl.nabla_grad(eq_plastic_strain), ufl.nabla_grad(eq_plastic_strain)
+        #     )
+        # )
+    ) / dfx.fem.Constant(mesh, dfx.default_scalar_type(material.wc)) - dfx.fem.Constant(
+        mesh, 1.0
+    )
+
 
 # %% Define constitutive relations
 energy_history_expr = dfx.fem.Expression(
     ufl.conditional(
         ufl.gt(
-            constitutive.getStrainEnergyPositive(displacement, crack_phase)
-            + plastic_work
-            - dfx.fem.Constant(mesh, dfx.default_scalar_type(material.wc)),
+            fractureDriveForce(),
             energy_history,
         ),
-        constitutive.getStrainEnergyPositive(displacement, crack_phase)
-        + plastic_work
-        - dfx.fem.Constant(mesh, dfx.default_scalar_type(material.wc)),
+        fractureDriveForce(),
         energy_history,
     ),
     DS.element.interpolation_points(),
 )
 
-
-scalar_zero = dfx.fem.Constant(mesh, dfx.default_scalar_type(0.0))
-plastic_related_object_expr = dfx.fem.Expression(
-    ufl.inner(
-        ufl.dev(constitutive.getStress(displacement, scalar_zero)),
-        ufl.dev(constitutive.getStress(displacement, scalar_zero)),
-    ),
+plastic_work_inc_expr = dfx.fem.Expression(
+    0.5
+    * (
+        material.hardening(eq_plastic_strain)
+        + material.hardening(eq_plastic_strain_old)
+    )
+    * (eq_plastic_strain - eq_plastic_strain_old),
     S.element.interpolation_points(),
 )
 
+energy_history.x.array[:] = 0.0
 plastic_work.x.array[:] = 0.0
 
 
@@ -130,12 +221,14 @@ S_vis = dfx.fem.functionspace(mesh, ("CG", 1))
 displacement_vis = dfx.fem.Function(V_vis)
 crack_phase_vis = dfx.fem.Function(S_vis)
 energy_history_vis = dfx.fem.Function(S_vis)
-equivalent_plastic_strain_vis = dfx.fem.Function(S_vis)
+eq_plastic_strain_vis = dfx.fem.Function(S_vis)
+plastic_work_vis = dfx.fem.Function(S_vis)
 
 displacement_vis.name = "Displacement"
 crack_phase_vis.name = "Crack Phase"
 energy_history_vis.name = "Energy History"
-equivalent_plastic_strain_vis.name = "Equivalent Plastic Strain"
+eq_plastic_strain_vis.name = "Equivalent Plastic Strain"
+plastic_work_vis.name = "Plastic Work"
 
 
 # %% Construct the weak form
@@ -172,13 +265,23 @@ else:
     ) * ufl.dx
 
 P = 0.5 * (f + crack_phase_old)
+# crack_phase_weak_form = (
+#     material.eta_f * (f - crack_phase_old) * g * ufl.dx
+#     - dt
+#     * (
+#         2 * (1 - f) * energy_history * g
+#         - material.Gc0 / material.lf * f * g
+#         - material.Gc0 * material.lf * ufl.inner(ufl.grad(f), ufl.grad(g))
+#     )
+#     * ufl.dx
+# )
 crack_phase_weak_form = (
-    material.eta_p * (f - crack_phase_old) * g * ufl.dx
+    material.eta_f * (f - crack_phase_old) * g * ufl.dx
     - dt
     * (
-        2 * (1 - f) * energy_history * g
-        - material.Gc0 / material.lf * f * g
-        - material.Gc0 * material.lf * ufl.inner(ufl.grad(f), ufl.grad(g))
+        (1 - f) * material.zeta * energy_history * g
+        - f * g
+        - material.lf**2 * ufl.inner(ufl.nabla_grad(f), ufl.nabla_grad(g))
     )
     * ufl.dx
 )
@@ -187,27 +290,23 @@ crack_phase_L = dfx.fem.form(ufl.rhs(crack_phase_weak_form))
 
 
 def plasticObject(u):
-    scalar_zero = dfx.fem.Constant(mesh, dfx.default_scalar_type(0.0))
-    return ufl.inner(
-        ufl.dev(constitutive.getStress(u, scalar_zero)),
-        ufl.dev(constitutive.getStress(u, scalar_zero)),
+    return np.sqrt(3 / 2) * ufl.sqrt(
+        ufl.inner(
+            ufl.dev(constitutive.getStress(u, 0)),
+            ufl.dev(constitutive.getStress(u, 0)),
+        )
     )
 
 
-equivalent_plastic_strain_weak_form = (
-    material.eta_p
-    * (equivalent_plastic_strain - equivalent_plastic_strain_old)
-    * q
-    * ufl.dx
+eq_plastic_strain_weak_form = (
+    material.eta_p * (eq_plastic_strain - eq_plastic_strain_old) * q * ufl.dx
     - dt
     * (
-        np.sqrt(3 / 2) * plasticObject(displacement) * q
-        - (
-            material.hardening(equivalent_plastic_strain) * q
-            + material.y0
-            * material.lp**2
-            * ufl.inner(ufl.grad(equivalent_plastic_strain), ufl.grad(q))
-        )
+        plasticObject(displacement) * q
+        - material.hardening(eq_plastic_strain) * q
+        - material.y0
+        * material.lp**2
+        * ufl.inner(ufl.nabla_grad(eq_plastic_strain), ufl.nabla_grad(q))
     )
     * ufl.dx
 )
@@ -254,34 +353,24 @@ def is_void(x):
     return np.less_equal(np.sqrt((x[0] - c[0]) ** 2 + (x[1] - c[1]) ** 2), r)
 
 
-crack_phase_bcs = [
-    dfx.fem.dirichletbc(
-        dfx.fem.Constant(mesh, dfx.default_scalar_type(1.0)),
-        dfx.fem.locate_dofs_geometrical(S, is_crack),
-        S,
-    ),
-    # dfx.fem.dirichletbc(
-    #     dfx.fem.Constant(mesh, dfx.default_scalar_type(1.0)),
-    #     dfx.fem.locate_dofs_geometrical(S, is_void),
-    #     S,
-    # ),
-]
-
-# plastic_top = dfx.fem.Constant(
-#     mesh,
-#     dfx.default_scalar_type((0.0,) * topology_dim),
-# )
-# plastic_bot = dfx.fem.Constant(
-#     mesh,
-#     dfx.default_scalar_type((0.0,) * topology_dim),
-# )
-
-# equivalent_plastic_strain_bcs = [
+# crack_phase_bcs = [
 #     dfx.fem.dirichletbc(
-#         plastic_bot, dfx.fem.locate_dofs_topological(V, boundary_dim, bot), V
+#         dfx.fem.Constant(mesh, dfx.default_scalar_type(1.0)),
+#         dfx.fem.locate_dofs_geometrical(S, is_crack),
+#         S,
 #     ),
+#     # dfx.fem.dirichletbc(
+#     #     dfx.fem.Constant(mesh, dfx.default_scalar_type(1.0)),
+#     #     dfx.fem.locate_dofs_geometrical(S, is_void),
+#     #     S,
+#     # ),
+# ]
+
+# eq_plastic_strain_bcs = [
 #     dfx.fem.dirichletbc(
-#         plastic_top, dfx.fem.locate_dofs_topological(V, boundary_dim, top), V
+#         dfx.fem.Constant(mesh, dfx.default_scalar_type(1.0)),
+#         dfx.fem.locate_dofs_geometrical(S, is_crack),
+#         S,
 #     ),
 # ]
 
@@ -303,7 +392,7 @@ else:
     displacement_solver = NewtonSolver(comm, displacement_problem)
 
     displacement_solver.convergence_criterion = "incremental"
-    displacement_solver.rtol = 1e-8
+    displacement_solver.rtol = 1e-6
     displacement_solver.report = True
 
     ksp = displacement_solver.krylov_solver
@@ -322,23 +411,23 @@ else:
 crack_phase_problem = petsc.LinearProblem(
     a=crack_phase_a,
     L=crack_phase_L,
-    bcs=crack_phase_bcs,
+    # bcs=crack_phase_bcs,
     u=crack_phase,
 )
 
 equivalent_plastic_strain_problem = petsc.NonlinearProblem(
-    F=equivalent_plastic_strain_weak_form,
-    u=equivalent_plastic_strain,
-    # bcs=[],
+    F=eq_plastic_strain_weak_form,
+    u=eq_plastic_strain,
+    # bcs=eq_plastic_strain_bcs,
 )
 
-equivalent_plastic_strain_solver = NewtonSolver(comm, equivalent_plastic_strain_problem)
+eq_plastic_strain_solver = NewtonSolver(comm, equivalent_plastic_strain_problem)
 
-equivalent_plastic_strain_solver.convergence_criterion = "incremental"
-equivalent_plastic_strain_solver.rtol = 1e-8
-equivalent_plastic_strain_solver.report = True
+eq_plastic_strain_solver.convergence_criterion = "incremental"
+eq_plastic_strain_solver.rtol = 1e-6
+eq_plastic_strain_solver.report = True
 
-ksp = equivalent_plastic_strain_solver.krylov_solver
+ksp = eq_plastic_strain_solver.krylov_solver
 opts = PETSc.Options()
 option_prefix = ksp.getOptionsPrefix()
 opts[f"{option_prefix}ksp_type"] = "preonly"
@@ -432,6 +521,7 @@ if preset.out_xdmf:
 if preset.animation and have_pyvista:
     displacement_vis.interpolate(displacement)
     crack_phase_vis.interpolate(crack_phase)
+    eq_plastic_strain_vis.interpolate(eq_plastic_strain)
 
     points_num = mesh.geometry.x.shape[0]
 
@@ -456,7 +546,7 @@ if preset.animation and have_pyvista:
 
     if rank == host:
         plotter = pvqt.BackgroundPlotter(
-            title="Dynamic Crack Phase Field",
+            title="Crack Phase Field",
             auto_update=True,  # , window_size=(1600, 1120)
         )
 
@@ -522,7 +612,7 @@ for idx, t in enumerate(T):
 
     # Update the load
     load_top.value[preset.load_direction] = getLoad(t)
-    load_bot.value[preset.load_direction] = -getLoad(t)
+    # load_bot.value[preset.load_direction] = -getLoad(t)
 
     # Solve the problem
     timers["displacement_solve"].resume()
@@ -542,16 +632,17 @@ for idx, t in enumerate(T):
     crack_phase_problem.solve()
     timers["crack_phase_solve"].pause()
 
-    num_its_peeq, converged = equivalent_plastic_strain_solver.solve(
-        equivalent_plastic_strain
-    )
+    num_its_peeq, converged = eq_plastic_strain_solver.solve(eq_plastic_strain)
     assert converged, "Equivalent plastic strain solver did not converge"
 
     timers["normalize"].resume()
     crack_phase.x.array[:] = np.clip(crack_phase.x.array, crack_phase_old.x.array, 1)
-    equivalent_plastic_strain.x.array[:] = np.maximum(
-        equivalent_plastic_strain.x.array, equivalent_plastic_strain_old.x.array
+    eq_plastic_strain.x.array[:] = np.maximum(
+        eq_plastic_strain.x.array, eq_plastic_strain_old.x.array
     )
+    # eq_plastic_strain.x.array[:] = np.clip(
+    #     eq_plastic_strain.x.array, eq_plastic_strain_old.x.array, 1
+    # )
     timers["normalize"].pause()
 
     comm.Barrier()
@@ -560,7 +651,7 @@ for idx, t in enumerate(T):
     if preset.verbose:
         u_tuple = getMaxMin(displacement, displacement_old)
         d_tuple = getMaxMin(crack_phase, crack_phase_old)
-        p_tuple = getMaxMin(equivalent_plastic_strain, equivalent_plastic_strain_old)
+        p_tuple = getMaxMin(eq_plastic_strain, eq_plastic_strain_old)
         if rank == host:
             print(f"Time: {t:.3e}, Load: {getLoad(t):.3e}, δt: {dt.value:.3e}")
             if not constitutive.linear:
@@ -586,11 +677,11 @@ for idx, t in enumerate(T):
         displacement_vis.interpolate(displacement)
         crack_phase_vis.interpolate(crack_phase)
         energy_history_vis.interpolate(energy_history)
-        equivalent_plastic_strain_vis.interpolate(equivalent_plastic_strain)
+        eq_plastic_strain_vis.interpolate(eq_plastic_strain)
+        plastic_work_vis.interpolate(plastic_work)
 
     timers["plot"].resume()
     if preset.animation and have_pyvista:
-        # crack_phase_vis.interpolate(eq_stress)
         warped["Crack Phase"][:] = crack_phase_vis.x.array
         # warped["Displacement"][:] = displacement_vis.x.array
 
@@ -621,15 +712,9 @@ for idx, t in enumerate(T):
     displacement_old2.x.array[:] = displacement_old.x.array
     displacement_old.x.array[:] = displacement.x.array
     crack_phase_old.x.array[:] = crack_phase.x.array
-    plastic_work += (
-        0.5
-        * (
-            material.hardening(equivalent_plastic_strain)
-            + material.hardening(equivalent_plastic_strain_old)
-        )
-        * (equivalent_plastic_strain - equivalent_plastic_strain_old)
-    )
-    equivalent_plastic_strain_old.x.array[:] = equivalent_plastic_strain.x.array
+    plastic_work_inc.interpolate(plastic_work_inc_expr)
+    plastic_work.x.array[:] += plastic_work_inc.x.array
+    eq_plastic_strain_old.x.array[:] = eq_plastic_strain.x.array
     timers["update"].pause()
 
     timers["save"].resume()
@@ -638,12 +723,14 @@ for idx, t in enumerate(T):
             pvd_file.write_function(displacement_vis, t)
             pvd_file.write_function(crack_phase_vis, t)
             pvd_file.write_function(energy_history_vis, t)
-            pvd_file.write_function(equivalent_plastic_strain_vis, t)
+            pvd_file.write_function(eq_plastic_strain_vis, t)
+            pvd_file.write_function(plastic_work_vis, t)
         if preset.out_xdmf:
             xdmf_file.write_function(displacement_vis, t)
             xdmf_file.write_function(crack_phase_vis, t)
             xdmf_file.write_function(energy_history_vis, t)
-            xdmf_file.write_function(equivalent_plastic_strain_vis, t)
+            xdmf_file.write_function(eq_plastic_strain_vis, t)
+            xdmf_file.write_function(plastic_work_vis, t)
         if rank == host:
             print(f"Saved at {t:.3e}. Elapsed: {timer}, total elapsed: {total_timer}\n")
             sys.stdout.flush()

@@ -1,4 +1,6 @@
 import numpy as np
+import ufl
+
 
 class Material:
     def __init__(self) -> None:
@@ -7,34 +9,36 @@ class Material:
 
 class Ductile(Material):
     def __init__(self):
-        ## Units: mm, s, kg, MPa
+        ## Units: mm, s, kg
         # Mechanical properties
         self.rho = 7.8e-6  # Mass Density, kg/mm^3
-        self.lame = 101163.333333333  # Lamé coefficient, MPa; bulk modulus = 150000 MPa
-        self.mu = 73255  # Shear modulus, MPa
+        self.lame = 101163.333333333e3  # Lamé coefficient, kg mm / s^2 / mm^2; bulk modulus = 150000 MPa
+        self.mu = 73255e3  # Shear modulus, kg mm / s^2 / mm^2
 
         # Crack phase properties
         self.Gc0 = 1000  # Initial critical fracture energy, KJ/m^2 (kg/s^2)
         self.Gc_inf = 142.5  # Reduced critical fracture energy, KJ/m^2
         self.omega_f = 42.325  # Saturation exponent (Fracture), -
-        self.eta_f = 6e-6  # Fracture viscosity parameter, MPa s
+        self.eta_f = 6e-3  # Fracture viscosity parameter, kg mm / s^2 / mm^2 s
         self.lf = 0.78125  # Fracture length scale, mm
-        self.wc = 180  # Critical work density, MPa
+        self.wc = 180e3  # Critical work density, kg mm / s^2 / mm^2
+        self.zeta = 0.5  # Fracture parameter, -
+        # this is a parameter determining the slope of the post-critical range of fracture
+        # with \zeta < 1 for a convex and \zeta > 1 for a non-convex resistance function \hat{D}^{pf}
 
         # Plastic phase properties
-        self.y0 = 343  # Initial yield stress, MPa
-        self.y_inf = 680  # Ultimate yield stress, MPa
+        self.y0 = 343e3  # Initial yield stress, kg mm / s^2 / mm^2
+        self.y_inf = 680e3  # Ultimate yield stress, kg mm / s^2 / mm^2
         self.omega_p = 16.93  # Saturation exponent (Plastic), -
-        self.h = 300  # Hardening modulus, MPa
-        self.eta_p = 6e-6  # Plastic viscosity parameter, MPa s
+        self.h = 300e3  # Hardening modulus, kg mm / s^2 / mm^2
+        self.eta_p = 6e-3  # Plastic viscosity parameter, kg mm / s^2 / mm^2 s
         self.lp = 0.78125  # Plastic length scale, mm
 
-    def hardening(self, equivalent_plastic_strain):
+    def hardening(self, p):
         return (
-            self.y_inf
-            - (self.y_inf - self.y0)
-            * np.exp(-self.omega_p * equivalent_plastic_strain)
-            + self.h * equivalent_plastic_strain
+            self.y0
+            + (self.y_inf - self.y0) * (1 - ufl.exp(-self.omega_p * p))
+            + self.h * p
         )
 
 
