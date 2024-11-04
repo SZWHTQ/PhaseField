@@ -29,7 +29,7 @@ from pathlib import Path
 
 import Presets
 
-preset = Presets.ziaei_rad_pure_shear
+preset = Presets.high_loading_rate
 material = preset.material
 constitutive = preset.constitutive
 

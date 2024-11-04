@@ -2,7 +2,7 @@ import ufl
 import ufl.algebra
 import ufl.algorithms
 
-from Material import Brittle, JohnsonCook
+from Material import Ductile, JohnsonCook
 
 
 class ConstitutiveRelation:
@@ -38,7 +38,7 @@ def macaulayBrackets(x):
 class Elastic_BourdinFrancfort2008(ConstitutiveRelation):
     # B. Bourdin, G.A. Francfort, J.-J. Marigo, The variational approach to fracture,
     # J. Elasticity 91 (1) (2008) 5–148.
-    def __init__(self, material: Brittle):
+    def __init__(self, material: Ductile):
         super().__init__(name="Bourdin Francfort 2008", linear=True)
 
         self.mu = material.mu
@@ -69,7 +69,7 @@ class Elastic_BourdinFrancfort2008(ConstitutiveRelation):
 class Elastic_AmorMarigo2009(ConstitutiveRelation):
     # H. Amor, J.-J. Marigo, C. Maurini, Regularized formulation of the variational brittle fracture with unilateral contact: Numerical experiments,
     # J. Mech. Phys. Solids 57 (2009) 1209–1229.
-    def __init__(self, material: Brittle):
+    def __init__(self, material: Ductile):
         super().__init__(name="Amor Marigo 2009", linear=False)
 
         self.mu = material.mu
@@ -131,8 +131,9 @@ class ElasticPlastic(ConstitutiveRelation):
         yield_stress = self.material.getYieldStress(
             equivalent_plastic_strain, strain_rate, temperature, d
         )
-        
-        
+
+        if equivalent_stress <= yield_stress:
+            return stress
 
     def getStrainEnergyPositive(self, u, _):
         return 0.5 * self.lame * ufl.tr(self.getStrain(u)) ** 2 + self.mu * ufl.inner(

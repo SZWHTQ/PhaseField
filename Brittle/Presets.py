@@ -1,11 +1,12 @@
 import pathlib
+# import warnings
 
 import Material
 import ConstitutiveRelation as cr
 
 
 class Preset:
-    def __init__(self, name="Default", material=Material.Brittle()):
+    def __init__(self, name="Default", material=None):
         self.__name = name
 
         self.mesh_x = 100
@@ -26,6 +27,14 @@ class Preset:
         self.screenshot = True
 
         self.material = material
+        if self.material is None:
+            self.material = Material.Brittle()
+        else:
+            if isinstance(material, Material.Brittle):
+                self.material = material
+            else:
+                # warnings.warn("Material should be of type Brittle")
+                raise TypeError("Material should be of type Brittle")
 
         self.constitutive = cr.ConstitutiveRelation()
 
