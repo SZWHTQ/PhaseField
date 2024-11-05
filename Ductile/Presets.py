@@ -38,7 +38,7 @@ class Preset:
                 # warnings.warn("Material should be of type Ductile")
                 raise TypeError("Material should be of type Ductile")
 
-        self.constitutive = cr.Elastic_BourdinFrancfort2008(self.material)
+        self.constitutive = cr.ElastoPlastic_BourdinFrancfort2008(self.material)
 
     def __str__(self):
         return self.__name
@@ -70,7 +70,8 @@ miehe_2016_shear.mesh_x = 250
 miehe_2016_shear.mesh_y = 250
 miehe_2016_shear.load_direction = 0
 miehe_2016_shear.crack_length = 0.5
-miehe_2016_shear.u_r = 6e-3
-miehe_2016_shear.end_t = 1
+miehe_2016_shear.u_r = 60e-3
+miehe_2016_shear.end_t = 1e-3
 # 10s, just for testing, in that Miehe was on the static case
-miehe_2016_shear.num_iterations = 500
+miehe_2016_shear.num_iterations = 300
+# miehe_2016_shear.save_interval = 1 # For debugging

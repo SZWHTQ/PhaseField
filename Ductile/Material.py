@@ -16,13 +16,13 @@ class Ductile(Material):
         self.mu = 73255e3  # Shear modulus, kg mm / s^2 / mm^2
 
         # Crack phase properties
-        self.Gc0 = 1000  # Initial critical fracture energy, KJ/m^2 (kg/s^2)
-        self.Gc_inf = 142.5  # Reduced critical fracture energy, KJ/m^2
-        self.omega_f = 42.325  # Saturation exponent (Fracture), -
+        # self.Gc0 = 1000  # Initial critical fracture energy, KJ/m^2 (kg/s^2)
+        # self.Gc_inf = 142.5  # Reduced critical fracture energy, KJ/m^2
+        # self.omega_f = 42.325  # Saturation exponent (Fracture), -
         self.eta_f = 6e-3  # Fracture viscosity parameter, kg mm / s^2 / mm^2 s
         self.lf = 0.78125  # Fracture length scale, mm
         self.wc = 180e3  # Critical work density, kg mm / s^2 / mm^2
-        self.zeta = 0.5  # Fracture parameter, -
+        self.zeta = 1  # Fracture parameter, -
         # this is a parameter determining the slope of the post-critical range of fracture
         # with \zeta < 1 for a convex and \zeta > 1 for a non-convex resistance function \hat{D}^{pf}
 

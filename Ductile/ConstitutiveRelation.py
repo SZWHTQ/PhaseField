@@ -14,9 +14,6 @@ class ConstitutiveRelation:
     def getStress(self, u):
         raise NotImplementedError
 
-    def getElasticStress(self, elastic_strain):
-        raise NotImplementedError
-
     def getStrainEnergyPositive(self, u):
         raise NotImplementedError
 
@@ -43,7 +40,7 @@ class Elastic_BourdinFrancfort2008(ConstitutiveRelation):
         self.lame = material.lame
 
     def getStrain(self, u):
-        return ufl.sym(ufl.grad(u))
+        return ufl.sym(ufl.nabla_grad(u))
 
     def getStress(self, u, d):
         return (1 - d) ** 2 * (
@@ -56,13 +53,9 @@ class Elastic_BourdinFrancfort2008(ConstitutiveRelation):
             self.getStrain(u), self.getStrain(u)
         )
 
-    def getElasticStress(self, elastic_strain):
-        print(f"elastic_strain: {elastic_strain}")
-        print(f"len(elastic_strain): {len(elastic_strain)}")
-        print(f"len(elastic_strain[0]): {len(elastic_strain[0])}")
-        print(f"len(elastic_strain.x.array[0]): {len(elastic_strain.x.array[0])}")
+    def getElasticStress(self, elastic_strain, dim=2):
         return (
-            self.lame * ufl.tr(elastic_strain) * ufl.Identity(2)
+            self.lame * ufl.tr(elastic_strain) * ufl.Identity(dim)
             + 2.0 * self.mu * elastic_strain
         )
 
@@ -108,6 +101,60 @@ class Elastic_AmorMarigo2009(ConstitutiveRelation):
 
         return c * tr_epsilon_pos**2 + self.mu * ufl.inner(
             ufl.dev(self.getStrain(u)), ufl.dev(self.getStrain(u))
+        )
+
+
+class ElastoPlastic_BourdinFrancfort2008(ConstitutiveRelation):
+    def __init__(self, material: Ductile):
+        super().__init__(name="Bourdin Francfort 2008 Plastic")
+
+        self.linear = False
+
+        self.mu = material.mu
+        self.lame = material.lame
+
+        self._material = material
+
+        self._critical_eq_strain = self._material.y0 / 3 / self.mu
+
+    def getStrain(self, u):
+        return ufl.sym(ufl.nabla_grad(u))
+
+    def getStress(self, u, d, peeq):
+        # ep_shear_module = eq_stress
+
+        strain = self.getStrain(u)
+        eq_strain = ufl.sqrt(2 / 3 * ufl.inner(ufl.dev(strain), ufl.dev(strain)))
+
+        ep_mu = ufl.conditional(
+            ufl.lt(eq_strain, self._material.y0 / 3 / self.mu),
+            self.mu,
+            self._material.hardening(peeq) / 3 / eq_strain,
+        )
+        ep_lame = self.lame + 2 / 3 * (self.mu - ep_mu)
+
+        return (1 - d) ** 2 * (
+            ep_lame * ufl.tr(self.getStrain(u)) * ufl.Identity(len(u))
+            + 2.0 * ep_mu * self.getStrain(u)
+        )
+
+    def getElasticStrain(self, u, peeq):
+        stress = self.getStress(u, 0, peeq)
+        return ufl.dev(stress) / (2 * self.mu) + (
+            ufl.tr(self.getStrain(u)) / 3
+        ) * ufl.Identity(len(u))
+
+    def getElasticStress(self, u, peeq):
+        elastic_strain = self.getElasticStrain(u, peeq)
+        return (
+            self.lame * ufl.tr(elastic_strain) * ufl.Identity(len(u))
+            + 2 * self.mu * elastic_strain
+        )
+
+    def getElasticStrainEnergyPositive(self, u, peeq):
+        elastic_strain = self.getElasticStrain(u, peeq)
+        return 0.5 * self.lame * ufl.tr(elastic_strain) ** 2 + ufl.tr(
+            ufl.dot(elastic_strain, elastic_strain)
         )
 
 
