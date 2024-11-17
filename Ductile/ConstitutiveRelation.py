@@ -1,4 +1,7 @@
 import ufl
+import dolfinx as dfx
+
+import numpy as np
 
 from Material import Ductile, JohnsonCook
 
@@ -30,195 +33,307 @@ def macaulayBrackets(x):
     return positive, negative
 
 
-class Elastic_BourdinFrancfort2008(ConstitutiveRelation):
-    # B. Bourdin, G.A. Francfort, J.-J. Marigo, The variational approach to fracture,
-    # J. Elasticity 91 (1) (2008) 5–148.
-    def __init__(self, material: Ductile):
-        super().__init__(name="Bourdin Francfort 2008", linear=True)
+class ElastoPlastic_BourdinFrancfort2008(ConstitutiveRelation):
+    def __init__(self, material: Ductile | JohnsonCook):
+        super().__init__(name="Bourdin Francfort 2008 Plastic")
+
+        self.linear = True
 
         self.mu = material.mu
         self.lame = material.lame
 
-    def getStrain(self, u):
+    def getStrain(self, u: dfx.fem.Function) -> dfx.fem.Function:
         return ufl.sym(ufl.nabla_grad(u))
 
-    def getStress(self, u, d):
+    def getStress(self, u: dfx.fem.Function, d: dfx.fem.Function) -> dfx.fem.Function:
         return (1 - d) ** 2 * (
             self.lame * ufl.tr(self.getStrain(u)) * ufl.Identity(len(u))
             + 2.0 * self.mu * self.getStrain(u)
         )
 
-    def getStrainEnergyPositive(self, u, _):
-        return 0.5 * self.lame * ufl.tr(self.getStrain(u)) ** 2 + self.mu * ufl.inner(
-            self.getStrain(u), self.getStrain(u)
+    def getStressByStrain(
+        self, e: dfx.fem.Function, d: dfx.fem.Function, dim=2
+    ) -> dfx.fem.Function:
+        return (1 - d) ** 2 * (
+            self.lame * ufl.tr(e) * ufl.Identity(dim) + 2 * self.mu * e
         )
 
-    def getElasticStress(self, elastic_strain, dim=2):
-        return (
-            self.lame * ufl.tr(elastic_strain) * ufl.Identity(dim)
-            + 2.0 * self.mu * elastic_strain
-        )
-
-    def getElasticStrainEnergyPositive(self, elastic_strain):
-        return 0.5 * self.lame * ufl.tr(elastic_strain) ** 2 + self.mu * ufl.tr(
-            ufl.dot(elastic_strain, elastic_strain)
-        )
-
-    # def getStrainEnergyPositive(self, u):
-    #     return 0.5 * (self.lame + self.mu) * (
-    #         0.5 * (ufl.tr(self.getStrain(u)) + abs(ufl.tr(self.getStrain(u))))
-    #     ) ** 2 + self.mu * ufl.inner(
-    #         ufl.dev(self.getStrain(u)), ufl.dev(self.getStrain(u))
-    #     )
+    def getStrainEnergyPositive(self, e: dfx.fem.Function) -> dfx.fem.Function:
+        return 0.5 * self.lame * ufl.tr(e) ** 2 + self.mu * ufl.inner(e, e)
 
 
-class Elastic_AmorMarigo2009(ConstitutiveRelation):
-    # H. Amor, J.-J. Marigo, C. Maurini, Regularized formulation of the variational brittle fracture with unilateral contact: Numerical experiments,
-    # J. Mech. Phys. Solids 57 (2009) 1209–1229.
-    def __init__(self, material: Ductile):
+class ElastoPlastic_AmorMarigo2009(ConstitutiveRelation):
+    def __init__(self, material: JohnsonCook):
         super().__init__(name="Amor Marigo 2009", linear=False)
-
-        self.mu = material.mu
-        self.lame = material.lame
-
-    def getStrain(self, u):
-        return ufl.sym(ufl.grad(u))
-
-    def getStress(self, u, d):
-        c = self.lame + 2 * self.mu / 3
-        tr_epsilon_pos, tr_epsilon_neg = macaulayBrackets(ufl.tr(self.getStrain(u)))
-
-        sigma_p = c * tr_epsilon_pos * ufl.Identity(len(u)) + 2 * self.mu * ufl.dev(
-            self.getStrain(u)
-        )
-        sigma_n = c * tr_epsilon_neg * ufl.Identity(len(u))
-
-        return (1 - d) ** 2 * sigma_p + sigma_n
-
-    def getStrainEnergyPositive(self, u, d):
-        c = self.lame / 2 + self.mu / 3
-        tr_epsilon_pos, _ = macaulayBrackets(ufl.tr(self.getStrain(u)))
-
-        return c * tr_epsilon_pos**2 + self.mu * ufl.inner(
-            ufl.dev(self.getStrain(u)), ufl.dev(self.getStrain(u))
-        )
-
-
-class ElastoPlastic_BourdinFrancfort2008(ConstitutiveRelation):
-    def __init__(self, material: Ductile):
-        super().__init__(name="Bourdin Francfort 2008 Plastic")
 
         self.linear = False
 
         self.mu = material.mu
         self.lame = material.lame
 
-        self._material = material
-
-        self._critical_eq_strain = self._material.y0 / 3 / self.mu
-
     def getStrain(self, u):
         return ufl.sym(ufl.nabla_grad(u))
 
-    def getStress(self, u, d, peeq):
-        # ep_shear_module = eq_stress
+    def getStress(self, u, d):
+        return self.getStressByStrain(self.getStrain(u), d, dim=len(u))
 
-        strain = self.getStrain(u)
-        eq_strain = ufl.sqrt(2 / 3 * ufl.inner(ufl.dev(strain), ufl.dev(strain)))
+    def getStressByStrain(self, e, d, dim=2):
+        c = self.lame + 2 * self.mu / 3
+        tr_epsilon_pos, tr_epsilon_neg = macaulayBrackets(ufl.tr(e))
 
-        ep_mu = ufl.conditional(
-            ufl.lt(eq_strain, self._material.y0 / 3 / self.mu),
-            self.mu,
-            self._material.hardening(peeq) / 3 / eq_strain,
+        sigma_p = c * tr_epsilon_pos * ufl.Identity(dim) + 2 * self.mu * ufl.dev(e)
+        sigma_n = c * tr_epsilon_neg * ufl.Identity(dim)
+
+        return (1 - d) ** 2 * sigma_p + sigma_n
+
+    def getStrainEnergyPositive(self, e):
+        S = dfx.fem.functionspace(e.function_space.mesh, ("CG", 1))
+        strain_energy_positive = dfx.fem.Function(S)
+        c = self.lame / 2 + self.mu / 3
+        tr_epsilon_pos, _ = macaulayBrackets(ufl.tr(e))
+
+        strain_energy_positive_expr = dfx.fem.Expression(
+            c * tr_epsilon_pos**2 + self.mu * ufl.inner(ufl.dev(e), ufl.dev(e)),
+            S.element.interpolation_points(),
         )
-        ep_lame = self.lame + 2 / 3 * (self.mu - ep_mu)
+        strain_energy_positive.interpolate(strain_energy_positive_expr)
 
-        return (1 - d) ** 2 * (
-            ep_lame * ufl.tr(self.getStrain(u)) * ufl.Identity(len(u))
-            + 2.0 * ep_mu * self.getStrain(u)
-        )
-
-    def getElasticStrain(self, u, peeq):
-        stress = self.getStress(u, 0, peeq)
-        return ufl.dev(stress) / (2 * self.mu) + (
-            ufl.tr(self.getStrain(u)) / 3
-        ) * ufl.Identity(len(u))
-
-    def getElasticStress(self, u, peeq):
-        elastic_strain = self.getElasticStrain(u, peeq)
-        return (
-            self.lame * ufl.tr(elastic_strain) * ufl.Identity(len(u))
-            + 2 * self.mu * elastic_strain
-        )
-
-    def getElasticStrainEnergyPositive(self, u, peeq):
-        elastic_strain = self.getElasticStrain(u, peeq)
-        return 0.5 * self.lame * ufl.tr(elastic_strain) ** 2 + ufl.tr(
-            ufl.dot(elastic_strain, elastic_strain)
-        )
+        return strain_energy_positive
 
 
 class Elastoplastic(ConstitutiveRelation):
     def __init__(self, material: JohnsonCook):
-        super().__init__(name="Elastoplastic")
+        super().__init__(name="Amor Marigo 2009", linear=False)
 
-        self.material = material
+        self.linear = False
 
-        # self.delta_time = 1
+        self.mu = material.mu
+        self.lame = material.lame
 
-        self.equivalent_plastic_strain = 0.0
-        self.strain_rate = 0.0
-        self.plastic_work = 0.0
+        self.eigens_prepared = False
 
     def getStrain(self, u):
-        return ufl.sym(ufl.grad(u))
+        return ufl.sym(ufl.nabla_grad(u))
 
-    def getEquivalentStress(self, u, d):
-        # stress = (1 - d) ** 2 * (
-        #     self.material.lame * ufl.tr(self.getStrain(u)) * ufl.Identity(len(u))
-        #     + 2.0
-        c = self.material.lame + 2 * self.material.shear_modulus / 3
-        tr_epsilon_pos, tr_epsilon_neg = macaulayBrackets(ufl.tr(self.getStrain(u)))
+    def getStress(self, u: dfx.fem.Function, d: dfx.fem.Function):
+        # return (1 - d) ** 2 * (
+        #     self.lame * ufl.tr(self.getStrain(u)) * ufl.Identity(len(u))
+        #     + 2.0 * self.mu * self.getStrain(u)
+        # )
 
-        sigma_p = c * tr_epsilon_pos * ufl.Identity(
-            len(u)
-        ) + 2 * self.material.shear_modulus * ufl.dev(self.getStrain(u))
-        sigma_n = c * tr_epsilon_neg * ufl.Identity(len(u))
+        # e = self.getStrain(u)
+        # dim = len(u)
+        # c = self.lame + 2 * self.mu / 3
+        # tr_epsilon_pos, tr_epsilon_neg = macaulayBrackets(ufl.tr(e))
 
-        stress = (1 - d) ** 2 * sigma_p + sigma_n
-        deviatoric_stress = ufl.dev(stress)
-        return ufl.sqrt(3 / 2 * ufl.inner(deviatoric_stress, deviatoric_stress) + 1e-6)
-        # return 3 / 2 * ufl.inner(deviatoric_stress, deviatoric_stress)
+        # sigma_p = c * tr_epsilon_pos * ufl.Identity(dim) + 2 * self.mu * ufl.dev(e)
+        # sigma_n = c * tr_epsilon_neg * ufl.Identity(dim)
+        # return (1 - d) ** 2 * sigma_p + sigma_n
 
-    # def getStress(self, u, d, T, delta_time=None):
-    #     yield_stress = self.material.getYieldStress(
-    #         self.equivalent_plastic_strain, self.strain_rate, temperature=T, damage=d
-    #     )
-
-    #     hardening_modulus = self.material.getHardeningModulus(
-    #         self.equivalent_plastic_strain, self.strain_rate, temperature=T, damage=d
-    #     )
-
-    #     stress = (1 - d) ** 2 * (
-    #         self.material.lame * ufl.tr(self.getStrain(u)) * ufl.Identity(len(u))
-    #         + 2.0 * self.material.shear_modulus * self.getStrain(u)
-    #     )
-
-    #     equivalent_stress = ufl.sqrt(
-    #         3.0 / 2.0 * ufl.inner(ufl.dev(stress), ufl.dev(stress))
-    #     )
-
-    #     yield_stress = self.material.getYieldStress(
-    #         equivalent_plastic_strain, strain_rate, temperature, d
-    #     )
-
-    #     if equivalent_stress <= yield_stress:
-    #         return stress
-
-    def getStrainEnergyPositive(self, u, _):
-        c = self.material.lame / 2 + self.material.shear_modulus / 3
-        tr_epsilon_pos, _ = macaulayBrackets(ufl.tr(self.getStrain(u)))
-
-        return c * tr_epsilon_pos**2 + self.material.shear_modulus * ufl.inner(
-            ufl.dev(self.getStrain(u)), ufl.dev(self.getStrain(u))
+        dim = len(u)
+        W = dfx.fem.functionspace(u.function_space.mesh, ("CG", 1, (dim, dim)))
+        e_expr = dfx.fem.Expression(
+            self.getStrain(u),
+            W.element.interpolation_points(),
         )
+        e = dfx.fem.Function(W)
+        e.interpolate(e_expr)
+        return self.getStressByStrain(e, d, dim)
+
+    # def getStressByStrain(self, e: dfx.fem.Function, d: dfx.fem.Function, dim=2):
+    #     # c = self.lame + 2 * self.mu / 3
+    #     # tr_epsilon_pos, tr_epsilon_neg = macaulayBrackets(ufl.tr(e))
+
+    #     # sigma_p = c * tr_epsilon_pos * ufl.Identity(dim) + 2 * self.mu * ufl.dev(e)
+    #     # sigma_n = c * tr_epsilon_neg * ufl.Identity(dim)
+
+    #     # return (1 - d) ** 2 * sigma_p + sigma_n
+    #     self._prepare_eigens(e, dim)
+    #     nodewise_stress = np.zeros((self._nodes_num, dim, dim))
+    #     s = np.zeros((dim, dim))
+    #     for idx in range(self._nodes_num):
+    #         tr = np.sum(self._nodewise_principle_strains[idx])
+    #         f_tr = 1 if tr > 0 else 0
+    #         for j in range(dim):
+    #             principle_e = self._nodewise_principle_strains[idx, j]
+    #             f = 1 if principle_e > 0 else 0
+    #             s[j, j] = (
+    #                 2 * self.mu * principle_e * (1 - f * d) ** 2
+    #                 + self.lame * tr * (1 - f_tr * d) ** 2
+    #             )
+    #         principle_d: np.matrix = self._nodewise_principle_directions[idx]
+    #         nodewise_stress[idx] = np.matmul(principle_d, np.matmul(s, principle_d.T))
+    #     stress = dfx.fem.Function(e.function_space)
+    #     stress.x.array[:] = nodewise_stress.flatten()
+    #     return stress
+
+    # def getStrainEnergyPositive(self, e: dfx.fem.Function):
+    #     assert self.eigens_prepared, "Eigens are not prepared"
+    #     S = dfx.fem.functionspace(e.function_space.mesh, ("CG", 1))
+    #     strain_energy_positive = dfx.fem.Function(S)
+    #     dim = self._nodewise_principle_strains.shape[1]
+    #     for idx in range(self._nodes_num):
+    #         tr = np.sum(self._nodewise_principle_strains[idx])
+    #         strain_energy_positive.x.array[idx] = 0.5 * self.lame * max(tr, 0.0) ** 2
+    #         for j in range(dim):
+    #             strain_energy_positive.x.array[idx] += (
+    #                 self.mu * max(self._nodewise_principle_strains[idx, j], 0.0) ** 2
+    #             )
+    #     return strain_energy_positive
+    def getStressByStrain(self, e: dfx.fem.Function, d, dim=2):
+        self._prepare_eigens(e, dim)
+        tr = np.sum(self._nodewise_principle_strains, axis=1)
+        f_tr = (tr > 0).astype(float)
+        f = (self._nodewise_principle_strains > 0).astype(float)
+        principle_e = self._nodewise_principle_strains
+        # d_array = d.x.array[:self._nodes_num]
+        if isinstance(d, dfx.fem.Function):
+            d_array = d.x.array[:]
+        elif isinstance(d, np.ndarray):
+            d_array = d
+        elif isinstance(d, float):
+            d_array = np.array([d] * self._nodes_num)
+        s = (
+            2 * self.mu * principle_e * (1 - f * d_array[:, None]) ** 2
+            + self.lame * tr[:, None] * (1 - f_tr * d_array)[:, None] ** 2
+        )
+        nodewise_stress = np.einsum(
+            "nij,njk,nlk->nil",
+            self._nodewise_principle_directions,
+            s[:, :, None] * np.eye(dim),
+            self._nodewise_principle_directions,
+        )
+        stress = dfx.fem.Function(e.function_space)
+        stress.x.array[:] = nodewise_stress.reshape(-1)
+        return stress
+
+    def getStrainEnergyPositive(self, e: dfx.fem.Function):
+        assert self.eigens_prepared, "Eigens are not prepared"
+        S = dfx.fem.functionspace(e.function_space.mesh, ("CG", 1))
+        strain_energy_positive = dfx.fem.Function(S)
+        tr = np.sum(self._nodewise_principle_strains, axis=1)
+        tr_positive = np.maximum(tr, 0.0)
+        strain_energy_positive_values = 0.5 * self.lame * tr_positive**2
+        strain_energy_positive_values += np.sum(
+            self.mu * np.maximum(self._nodewise_principle_strains, 0.0) ** 2, axis=1
+        )
+        strain_energy_positive.x.array[:] = strain_energy_positive_values
+        return strain_energy_positive
+
+    def _prepare_eigens(self, e: dfx.fem.Function, dim: int):
+        if dim == 2 or dim == 3:
+            nodewise_strains = np.reshape(e.x.array[:], (-1, dim, dim))
+            self._nodes_num = len(nodewise_strains)
+            self._nodewise_principle_strains = np.zeros((self._nodes_num, dim))
+            self._nodewise_principle_directions = np.zeros((self._nodes_num, dim, dim))
+            for idx, strain in enumerate(nodewise_strains):
+                eigenvalues, eigenvectors = np.linalg.eig(strain)
+                self._nodewise_principle_strains[idx] = eigenvalues
+                self._nodewise_principle_directions[idx] = eigenvectors
+            self.eigens_prepared = True
+        else:
+            raise ValueError("Topology dimension is not valid")
+
+    # # Get positive strain energy and update stress by principle strain
+    # if topology_dim == 2:
+    #     elementwise_eigenvalues = []
+    #     elementwise_eigenvectors = []
+    #     for cell in range(len(mesh.cells)):
+    #         points = dfx.cpp.mesh.cell_dofs(mesh, cell)
+
+    #         strain_value = strain.eval(points)
+
+    #         for strain_matrix in strain_value:
+    #             eigenvalues, eigenvectors = np.linalg.eig(strain_matrix)
+    #             elementwise_eigenvalues.append(eigenvalues)
+    #             elementwise_eigenvectors.append(eigenvectors)
+
+    #     principle_strain_1 = dfx.fem.Function(S)
+    #     principle_strain_2 = dfx.fem.Function(S)
+    #     principle_direction_1 = dfx.fem.Function(V)
+    #     principle_direction_2 = dfx.fem.Function(V)
+
+    #     with principle_strain_1
+
+    #     principle_strains = []
+    #     principle_directions = []
+
+    #     principle_trace = dfx.fem.Function(S)
+
+    #     for i in range(nconv):
+    #         principle_strains.append(E.getEigenvalue(i))
+    #         vr, vi = A.getVecs()
+    #         E.getEigenvector(i, vr, vi)
+    #         principle_directions.append(vr.getArray())
+
+    #     principle_direction_matrix = ufl.as_matrix(principle_directions)
+
+    #     principle_trace_expr = dfx.fem.Expression(
+    #         principle_strains[0] + principle_strains[1],
+    #         S.element.interpolation_points(),
+    #     )
+
+    #     positive_strain_energy_expr = dfx.fem.Expression(
+    #         0.5
+    #         * (
+    #             material.lame * ufl.max_value(principle_trace, 0.0) ** 2
+    #             + 2
+    #             * material.mu
+    #             * (
+    #                 ufl.max_value(principle_strains[0], 0.0) ** 2
+    #                 + ufl.max_value(principle_strains[1], 0.0) ** 2
+    #             )
+    #         )
+    #     )
+
+    #     def get_principle_stress(e):
+    #         return (
+    #             material.lame
+    #             * principle_trace
+    #             * (
+    #                 1
+    #                 - ufl.conditional(ufl.gt(principle_trace, 0.0), 1.0, 0.0)
+    #                 * crack_phase
+    #             )
+    #             ** 2
+    #             + 2
+    #             * material.mu
+    #             * e
+    #             * (1 - ufl.conditional(ufl.gt(e, 0.0), 1.0, 0.0) * crack_phase)
+    #             ** 2,
+    #         )
+
+    #     principle_stress_1 = dfx.fem.Function(S)
+    #     principle_stress_2 = dfx.fem.Function(S)
+
+    #     principle_stress_1.interpolate(
+    #         dfx.fem.Expression(
+    #             get_principle_stress(principle_strains[0]),
+    #             S.element.interpolation_points(),
+    #         )
+    #     )
+    #     principle_stress_2.interpolate(
+    #         dfx.fem.Expression(
+    #             get_principle_stress(principle_strains[1]),
+    #             S.element.interpolation_points(),
+    #         )
+    #     )
+
+    #     update_stress_expr = dfx.fem.Expression(
+    #         ufl.dot(
+    #             ufl.dot(
+    #                 principle_direction_matrix,
+    #                 ufl.as_matrix(
+    #                     [[principle_stress_1, 0], [0, principle_stress_2]]
+    #                 ),
+    #             ),
+    #             ufl.transpose(principle_direction_matrix),
+    #         ),
+    #         W.element.interpolation_points(),
+    #     )
+    #     stress.interpolate(update_stress_expr)
+
+    # elif topology_dim == 3:
+    #     raise NotImplementedError("3D is not implemented yet")
+    # else:
+    #     raise ValueError("Topology dimension is not valid")

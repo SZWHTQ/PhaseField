@@ -29,7 +29,7 @@ from pathlib import Path
 
 import Presets
 
-preset = Presets.nl_high_loading_rate
+preset = Presets.high_loading_rate
 material = preset.material
 constitutive = preset.constitutive
 
@@ -99,14 +99,19 @@ energy_history_expr = dfx.fem.Expression(
     DS.element.interpolation_points(),
 )
 
-
+W_vis = dfx.fem.functionspace(mesh, ("CG", 1, (topology_dim, topology_dim)))
 V_vis = dfx.fem.functionspace(mesh, ("CG", 1, (topology_dim,)))
 S_vis = dfx.fem.functionspace(mesh, ("CG", 1))
 
+strain_expr = dfx.fem.Expression(
+    constitutive.getStrain(displacement), W_vis.element.interpolation_points()
+)
+strain_vis = dfx.fem.Function(W_vis)
 displacement_vis = dfx.fem.Function(V_vis)
 crack_phase_vis = dfx.fem.Function(S_vis)
 energy_history_vis = dfx.fem.Function(S_vis)
 
+strain_vis.name = "Strain"
 displacement_vis.name = "Displacement"
 crack_phase_vis.name = "Crack Phase"
 energy_history_vis.name = "Energy History"
@@ -468,6 +473,7 @@ for idx, t in enumerate(T):
         displacement_vis.interpolate(displacement)
         crack_phase_vis.interpolate(crack_phase)
         energy_history_vis.interpolate(energy_history)
+        strain_vis.interpolate(strain_expr)
 
     timers["plot"].resume()
     if preset.animation and have_pyvista:
@@ -511,6 +517,7 @@ for idx, t in enumerate(T):
             xdmf_file.write_function(displacement_vis, t)
             xdmf_file.write_function(crack_phase_vis, t)
             xdmf_file.write_function(energy_history_vis, t)
+            xdmf_file.write_function(strain_vis, t)
         if rank == host:
             print(f"Saved at {t:.3e}. Elapsed: {timer}, total elapsed: {total_timer}\n")
             sys.stdout.flush()
