@@ -114,12 +114,14 @@ class Elastoplastic(ConstitutiveRelation):
 
     def getStrain(self, u):
         return ufl.sym(ufl.nabla_grad(u))
+        # F = ufl.nabla_grad(u) + ufl.Identity(len(u))
+        # return 0.5 * (F.T * F - ufl.Identity(len(u)))
 
     def getStress(self, u: dfx.fem.Function, d: dfx.fem.Function):
-        # return (1 - d) ** 2 * (
-        #     self.lame * ufl.tr(self.getStrain(u)) * ufl.Identity(len(u))
-        #     + 2.0 * self.mu * self.getStrain(u)
-        # )
+        return (1 - d) ** 2 * (
+            self.lame * ufl.tr(self.getStrain(u)) * ufl.Identity(len(u))
+            + 2.0 * self.mu * self.getStrain(u)
+        )
 
         # e = self.getStrain(u)
         # dim = len(u)
@@ -130,15 +132,15 @@ class Elastoplastic(ConstitutiveRelation):
         # sigma_n = c * tr_epsilon_neg * ufl.Identity(dim)
         # return (1 - d) ** 2 * sigma_p + sigma_n
 
-        dim = len(u)
-        W = dfx.fem.functionspace(u.function_space.mesh, ("CG", 1, (dim, dim)))
-        e_expr = dfx.fem.Expression(
-            self.getStrain(u),
-            W.element.interpolation_points(),
-        )
-        e = dfx.fem.Function(W)
-        e.interpolate(e_expr)
-        return self.getStressByStrain(e, d, dim)
+        # dim = len(u)
+        # W = dfx.fem.functionspace(u.function_space.mesh, ("CG", 1, (dim, dim)))
+        # e_expr = dfx.fem.Expression(
+        #     self.getStrain(u),
+        #     W.element.interpolation_points(),
+        # )
+        # e = dfx.fem.Function(W)
+        # e.interpolate(e_expr)
+        # return self.getStressByStrain(e, d, dim)
 
     # def getStressByStrain(self, e: dfx.fem.Function, d: dfx.fem.Function, dim=2):
     #     # c = self.lame + 2 * self.mu / 3
@@ -185,7 +187,6 @@ class Elastoplastic(ConstitutiveRelation):
         tr = np.sum(self._nodewise_principle_strains, axis=1)
         f_tr = (tr > 0).astype(float)
         f = (self._nodewise_principle_strains > 0).astype(float)
-        principle_e = self._nodewise_principle_strains
         # d_array = d.x.array[:self._nodes_num]
         if isinstance(d, dfx.fem.Function):
             d_array = d.x.array[:]
@@ -194,7 +195,10 @@ class Elastoplastic(ConstitutiveRelation):
         elif isinstance(d, float):
             d_array = np.array([d] * self._nodes_num)
         s = (
-            2 * self.mu * principle_e * (1 - f * d_array[:, None]) ** 2
+            2
+            * self.mu
+            * self._nodewise_principle_strains
+            * (1 - f * d_array[:, None]) ** 2
             + self.lame * tr[:, None] * (1 - f_tr * d_array)[:, None] ** 2
         )
         nodewise_stress = np.einsum(

@@ -192,6 +192,7 @@ acceleration = dfx.fem.Function(V)  # a_{k+1}
 acceleration_inc = dfx.fem.Function(V)  # da_{k+1}
 
 strain = dfx.fem.Function(W)  # \epsilon_{k+1}
+total_strain = dfx.fem.Function(W)  # \epsilon_{k+1}
 stress = dfx.fem.Function(W)  # \sigma_{k+1}
 deviatoric_stress = dfx.fem.Function(W)  # \sigma_{k+1}
 
@@ -229,6 +230,11 @@ temperature = dfx.fem.Function(S)  # T_{k+1}
 temperature_old = dfx.fem.Function(S)  # T_k
 
 # equilibrium_expr = dfx.fem.Expression(
+
+total_strain_expr = dfx.fem.Expression(
+    constitutive.getStrain(displacement),
+    W.element.interpolation_points(),
+)
 
 
 # %% Define constitutive relations
@@ -278,10 +284,6 @@ W_vis = dfx.fem.functionspace(mesh, ("CG", 1, (topology_dim, topology_dim)))
 V_vis = dfx.fem.functionspace(mesh, ("CG", 1, (topology_dim,)))
 S_vis = dfx.fem.functionspace(mesh, ("CG", 1))
 
-total_strain_expr = dfx.fem.Expression(
-    constitutive.getStrain(displacement),
-    W_vis.element.interpolation_points(),
-)
 displacement_vis = dfx.fem.Function(V_vis)
 strain_vis = dfx.fem.Function(W_vis)
 stress_vis = dfx.fem.Function(W_vis)
@@ -290,6 +292,7 @@ yield_stress_vis = dfx.fem.Function(S_vis)
 total_strain_vis = dfx.fem.Function(W_vis)
 plastic_strain_vis = dfx.fem.Function(W_vis)
 eq_plastic_strain_vis = dfx.fem.Function(S_vis)
+strain_energy_positive_vis = dfx.fem.Function(S_vis)
 plastic_work_vis = dfx.fem.Function(S_vis)
 crack_phase_vis = dfx.fem.Function(S_vis)
 energy_history_vis = dfx.fem.Function(S_vis)
@@ -306,6 +309,7 @@ yield_stress_vis.name = "Yield Stress"
 total_strain_vis.name = "Total Strain"
 plastic_strain_vis.name = "Plastic Strain"
 eq_plastic_strain_vis.name = "Equivalent Plastic Strain"
+strain_energy_positive_vis.name = "Strain Energy Positive"
 plastic_work_vis.name = "Plastic Work"
 crack_phase_vis.name = "Crack Phase"
 energy_history_vis.name = "Energy History"
@@ -360,7 +364,13 @@ def getDisplacementWeakForm(du):
         #     + ufl.inner(stress, ufl.nabla_grad(v))
         #     - ufl.dot(force, v)
         # )
-    ) * ufl.dx
+        * ufl.dx
+    )
+    # return (
+    #     material.rho * ufl.inner(a, v)
+    #     + ufl.inner(constitutive.getStress(displacement, crack_phase), ufl.grad(v))
+    #     - ufl.inner(f, v)
+    # ) * ufl.dx
 
 
 if constitutive.linear:
@@ -708,6 +718,9 @@ for iteration, current_time in enumerate(T):
             num_its_disp, converged = displacement_solver.solve(displacement_inc)
             assert converged, "Displacement solver did not converge"
 
+        displacement.x.array[:] += displacement_inc.x.array[:]
+        total_strain.interpolate(total_strain_expr)
+
         if iteration != 0:
             get_yield_stress_expr = dfx.fem.Expression(
                 material.getYieldStress(
@@ -766,8 +779,12 @@ for iteration, current_time in enumerate(T):
             # check_nan("plastic_strain_inc", plastic_strain_inc.x.array)
             # check_nan("plastic_strain", plastic_strain.x.array)
 
+            # strain_update_expr = dfx.fem.Expression(
+            #     strain + constitutive.getStrain(displacement_inc) - plastic_strain_inc,
+            #     W.element.interpolation_points(),
+            # )
             strain_update_expr = dfx.fem.Expression(
-                strain + constitutive.getStrain(displacement_inc) - plastic_strain_inc,
+                total_strain - plastic_strain,
                 W.element.interpolation_points(),
             )
             strain.interpolate(strain_update_expr)
@@ -810,12 +827,12 @@ for iteration, current_time in enumerate(T):
         )
         stress.interpolate(stress_update_expr)
 
-    strain_energy_positive = constitutive.getStrainEnergyPositive(strain)
+    strain_energy_positive.interpolate(constitutive.getStrainEnergyPositive(strain))
     constitutive.eigens_prepared = False
     timers["displacement_solve"].pause()
 
     timers["update"].resume()
-    displacement.x.array[:] += displacement_inc.x.array[:]
+    # displacement.x.array[:] += displacement_inc.x.array[:]
 
     displacement_inc_old3.x.array[:] = displacement_inc_old2.x.array[:]
     displacement_inc_old2.x.array[:] = displacement_inc_old.x.array[:]
@@ -899,9 +916,10 @@ for iteration, current_time in enumerate(T):
         stress_vis.interpolate(stress)
         eq_stress_vis.interpolate(eq_stress)
         yield_stress_vis.interpolate(yield_stress)
-        total_strain_vis.interpolate(total_strain_expr)
+        total_strain_vis.interpolate(total_strain)
         plastic_strain_vis.interpolate(plastic_strain)
         eq_plastic_strain_vis.interpolate(eq_plastic_strain)
+        strain_energy_positive_vis.interpolate(strain_energy_positive)
         plastic_work_vis.interpolate(plastic_work)
         crack_phase_vis.interpolate(crack_phase)
         energy_history_vis.interpolate(energy_history)
@@ -960,6 +978,7 @@ for iteration, current_time in enumerate(T):
             xdmf_file.write_function(total_strain_vis, current_time)
             xdmf_file.write_function(plastic_strain_vis, current_time)
             xdmf_file.write_function(eq_plastic_strain_vis, current_time)
+            xdmf_file.write_function(strain_energy_positive_vis, current_time)
             xdmf_file.write_function(plastic_work_vis, current_time)
             xdmf_file.write_function(crack_phase_vis, current_time)
             xdmf_file.write_function(energy_history_vis, current_time)

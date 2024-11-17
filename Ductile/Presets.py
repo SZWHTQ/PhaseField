@@ -44,44 +44,13 @@ class Preset:
             #     raise TypeError("Material should be of type Ductile")
             self.material = material
 
-        self.constitutive = cr.ElastoPlastic_AmorMarigo2009(self.material)
+        self.constitutive = cr.Elastoplastic(self.material)
 
     def __str__(self):
         return self.__name
 
 
 default = Preset()
-
-# %% Miehe 2016, gradient plasticity theory, single edge notch shear
-name = "Miehe_2016_Shear"
-# C. Miehe used for single edge notch shear and bar torsion test
-mild_steel = Material.Ductile()
-# E = 2e5 MPa, nu = 0.3
-mild_steel.lame = 115.384615385e6
-mild_steel.mu = 76.923076923e6
-mild_steel.eta_f = 0.1
-mild_steel.lf = 0.008
-mild_steel.wc = 13e3
-mild_steel.zeta = 1
-mild_steel.y0 = 450e3
-mild_steel.y_inf = 600e3
-mild_steel.omega_p = 16.96
-mild_steel.h = 130e3  # 200e3 for torsion
-mild_steel.eta_p = 0.1
-mild_steel.lp = 0.016
-
-miehe_2016_shear = Preset(name, mild_steel)
-miehe_2016_shear.output_directory = pathlib.Path("result") / name
-miehe_2016_shear.w = 1
-miehe_2016_shear.mesh_x = 250
-miehe_2016_shear.mesh_y = 250
-miehe_2016_shear.load_direction = 0
-miehe_2016_shear.crack_length = 0.5
-miehe_2016_shear.u_r = 60e-3
-miehe_2016_shear.end_t = 1e-3
-# 10s, just for testing, in that Miehe was on the static case
-miehe_2016_shear.num_iterations = 300
-# miehe_2016_shear.save_interval = 1 # For debugging
 
 # %% Johnson-Cook test preset, nothing to compare
 name = "JohnsonCook"
@@ -148,7 +117,38 @@ johnson_cook_3d.end_t = 4e-4
 # johnson_cook_3d.u_r = 0.4
 # johnson_cook_3d.end_t = 4e-4
 
-johnson_cook_3d.num_iterations = 2000
-johnson_cook_3d.save_interval = 10
+johnson_cook_3d.num_iterations = 1000
+johnson_cook_3d.save_interval = 5
 johnson_cook_3d.screenshot = False
 johnson_cook_3d.warp_factor = 0
+
+# %% Miehe 2016, gradient plasticity theory, single edge notch shear
+name = "Miehe_2016_Shear"
+# C. Miehe used for single edge notch shear and bar torsion test
+mild_steel = Material.Ductile()
+# E = 2e5 MPa, nu = 0.3
+mild_steel.lame = 115.384615385e6
+mild_steel.mu = 76.923076923e6
+mild_steel.eta_f = 0.1
+mild_steel.lf = 0.008
+mild_steel.wc = 13e3
+mild_steel.zeta = 1
+mild_steel.y0 = 450e3
+mild_steel.y_inf = 600e3
+mild_steel.omega_p = 16.96
+mild_steel.h = 130e3  # 200e3 for torsion
+mild_steel.eta_p = 0.1
+mild_steel.lp = 0.016
+
+miehe_2016_shear = Preset(name, mild_steel)
+miehe_2016_shear.output_directory = pathlib.Path("result") / name
+miehe_2016_shear.w = 1
+miehe_2016_shear.mesh_x = 250
+miehe_2016_shear.mesh_y = 250
+miehe_2016_shear.load_direction = 0
+miehe_2016_shear.crack_length = 0.5
+miehe_2016_shear.u_r = 60e-3
+miehe_2016_shear.end_t = 1e-3
+# 10s, just for testing, in that Miehe was on the static case
+miehe_2016_shear.num_iterations = 300
+# miehe_2016_shear.save_interval = 1 # For debugging
