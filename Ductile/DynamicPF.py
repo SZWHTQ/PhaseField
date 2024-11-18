@@ -171,13 +171,15 @@ W = dfx.fem.functionspace(mesh, ("CG", 1, (topology_dim, topology_dim)))
 V = dfx.fem.functionspace(mesh, ("CG", 1, (topology_dim,)))
 S = dfx.fem.functionspace(mesh, ("CG", 1))
 DW = dfx.fem.functionspace(mesh, ("DG", 1, (topology_dim, topology_dim)))
+DV = dfx.fem.functionspace(mesh, ("DG", 1, (topology_dim,)))
 DS = dfx.fem.functionspace(mesh, ("DG", 1))
 
 # Trial and test functions
 u, v = ufl.TrialFunction(V), ufl.TestFunction(V)
-f, g = ufl.TrialFunction(S), ufl.TestFunction(S)
 p, q = ufl.TrialFunction(S), ufl.TestFunction(S)
+d, f = ufl.TrialFunction(S), ufl.TestFunction(S)
 t, r = ufl.TrialFunction(S), ufl.TestFunction(S)
+a, m = ufl.TrialFunction(DV), ufl.TestFunction(DV)
 
 # Variable functions
 # Displacement
@@ -194,29 +196,33 @@ acceleration_inc = dfx.fem.Function(V)  # da_{k+1}
 strain = dfx.fem.Function(W)  # \epsilon_{k+1}
 total_strain = dfx.fem.Function(W)  # \epsilon_{k+1}
 stress = dfx.fem.Function(W)  # \sigma_{k+1}
+stress_old = dfx.fem.Function(W)  # \sigma_{k}
 deviatoric_stress = dfx.fem.Function(W)  # \sigma_{k+1}
 
 eq_stress = dfx.fem.Function(S)  # \sigma_{eq,k+1}
 
 # strain_energy = dfx.fem.Function(S)  # \psi^e_{k+1}
 
-strain_rate = dfx.fem.Function(S)  # \dot{\epsilon}_{k+1}
+strain_rate = dfx.fem.Function(DS)  # \dot{\alpha}_{k+1}
+stress_rate = dfx.fem.Function(W)  # \dot{\sigma}_{k+1}
+spin = dfx.fem.Function(W)  # \W_{k+1}
+jaumann_rate = dfx.fem.Function(W)
 
-yield_stress_new = dfx.fem.Function(S)
-yield_stress = dfx.fem.Function(S)
+yield_stress_new = dfx.fem.Function(DS)
+yield_stress = dfx.fem.Function(DS)
 
-hardening_modulus = dfx.fem.Function(S)
+hardening_modulus = dfx.fem.Function(DS)
 
-plastic_strain = dfx.fem.Function(W)  # \epsilon_{p,k+1}
-plastic_strain_inc = dfx.fem.Function(W)  # d\epsilon_{p,k+1}
+plastic_strain = dfx.fem.Function(DW)  # \epsilon_{p,k+1}
+plastic_strain_inc = dfx.fem.Function(DW)  # \epsilon_{p,k+1}
 
-eq_plastic_strain = dfx.fem.Function(S)  # \alpha_{k+1}
-eq_plastic_strain_inc = dfx.fem.Function(S)  # d\alpha_{k+1}
+eq_plastic_strain = dfx.fem.Function(DS)  # \alpha_{k+1}
+eq_plastic_strain_inc = dfx.fem.Function(DS)  # d\alpha_{k+1}
 
 strain_energy_positive = dfx.fem.Function(S)  # \psi^e_{k+1}
 
-plastic_work = dfx.fem.Function(S)  # W^p_{k+1}
-plastic_work_inc = dfx.fem.Function(S)  # dW^p_{k+1}
+plastic_work = dfx.fem.Function(DS)  # W^p_{k+1}
+plastic_work_inc = dfx.fem.Function(DS)  # dW^p_{k+1}
 
 
 # Crack phase field
@@ -228,6 +234,11 @@ energy_history = dfx.fem.Function(DS)  # H_{k+1}
 # Temperature
 temperature = dfx.fem.Function(S)  # T_{k+1}
 temperature_old = dfx.fem.Function(S)  # T_k
+
+if preset.magnetic:
+    magnetic_potential = dfx.fem.Function(DV)  # A_{k+1}
+
+    current = dfx.fem.Function(DV)  # J_{k+1}
 
 # equilibrium_expr = dfx.fem.Expression(
 
@@ -287,6 +298,9 @@ S_vis = dfx.fem.functionspace(mesh, ("CG", 1))
 displacement_vis = dfx.fem.Function(V_vis)
 strain_vis = dfx.fem.Function(W_vis)
 stress_vis = dfx.fem.Function(W_vis)
+strain_rate_vis = dfx.fem.Function(S_vis)
+spin_vis = dfx.fem.Function(W_vis)
+jaumann_rate_vis = dfx.fem.Function(W_vis)
 eq_stress_vis = dfx.fem.Function(S_vis)
 yield_stress_vis = dfx.fem.Function(S_vis)
 total_strain_vis = dfx.fem.Function(W_vis)
@@ -304,6 +318,9 @@ temperature_vis = dfx.fem.Function(S_vis)
 displacement_vis.name = "Displacement"
 strain_vis.name = "Strain"
 stress_vis.name = "Stress"
+strain_rate_vis.name = "Strain Rate"
+spin_vis.name = "Spin"
+jaumann_rate_vis.name = "Jaumann Rate"
 eq_stress_vis.name = "Equivalent Stress"
 yield_stress_vis.name = "Yield Stress"
 total_strain_vis.name = "Total Strain"
@@ -380,17 +397,17 @@ if constitutive.linear:
 else:
     displacement_weak_form = getDisplacementWeakForm(displacement_inc)
 
-P = 0.5 * (f + crack_phase_old)
+P = 0.5 * (d + crack_phase_old)
 crack_phase_weak_form = (
-    material.eta_f * (f - crack_phase_old) * g
+    material.eta_f * (d - crack_phase_old) * f
     - dt
     * (
-        2 * (1 - f) * energy_history * g
-        - material.Gc / material.lf * f * g
-        - material.Gc * material.lf * ufl.dot(ufl.nabla_grad(f), ufl.nabla_grad(g))
+        2 * (1 - d) * energy_history * f
+        - material.Gc / material.lf * d * f
+        - material.Gc * material.lf * ufl.dot(ufl.nabla_grad(d), ufl.nabla_grad(f))
         + 2
         * material.w0
-        * (f * g + material.lf**2 * ufl.dot(ufl.nabla_grad(f), ufl.nabla_grad(g)))
+        * (d * f + material.lf**2 * ufl.dot(ufl.nabla_grad(d), ufl.nabla_grad(f)))
     )
 ) * ufl.dx
 # crack_phase_weak_form = (
@@ -418,6 +435,14 @@ temperature_weak_form = (
 ) * ufl.dx
 temperature_a = dfx.fem.form(ufl.lhs(temperature_weak_form))
 temperature_L = dfx.fem.form(ufl.rhs(temperature_weak_form))
+
+if preset.magnetic:
+    magnetic_weak_form = (
+        1.0 / material.permittivity * ufl.inner(ufl.nabla_grad(a), ufl.nabla_grad(m))
+        - (ufl.dot(current, m))
+    ) * ufl.dx
+    magnetic_potential_a = dfx.fem.form(ufl.lhs(magnetic_weak_form))
+    magnetic_potential_L = dfx.fem.form(ufl.rhs(magnetic_weak_form))
 
 
 # %% Boundary conditions
@@ -522,6 +547,14 @@ temperature_problem = petsc.LinearProblem(
     bcs=[],
     u=temperature,
 )
+
+if preset.magnetic:
+    magnetic_problem = petsc.LinearProblem(
+        a=magnetic_potential_a,
+        L=magnetic_potential_L,
+        bcs=[],
+        u=magnetic_potential,
+    )
 
 # %% Output, iterative scheme and tools
 if preset.save_interval is None:
@@ -674,6 +707,7 @@ timers = {
     "energy_history": Timer(),
     "crack_phase_solve": Timer(),
     "temperature_solve": Timer(),
+    "magnetic_solve": Timer(),
     "normalize": Timer(),
     "verbose": Timer(),
     "plot": Timer(),
@@ -726,13 +760,13 @@ for iteration, current_time in enumerate(T):
                 material.getYieldStress(
                     crack_phase, eq_plastic_strain, strain_rate, temperature
                 ),
-                S.element.interpolation_points(),
+                DS.element.interpolation_points(),
             )
             get_hardening_modulus_expr = dfx.fem.Expression(
                 material.getHardeningModulus(
                     crack_phase, eq_plastic_strain, strain_rate, temperature
                 ),
-                S.element.interpolation_points(),
+                DS.element.interpolation_points(),
             )
             yield_stress.interpolate(get_yield_stress_expr)
             hardening_modulus.interpolate(get_hardening_modulus_expr)
@@ -758,7 +792,7 @@ for iteration, current_time in enumerate(T):
                     (eq_stress - yield_stress)
                     / (3.0 * material.mu + hardening_modulus),
                 ),
-                S.element.interpolation_points(),
+                DS.element.interpolation_points(),
             )
             eq_plastic_strain_inc.interpolate(eq_plastic_strain_inc_expr)
             eq_plastic_strain.x.array[:] += eq_plastic_strain_inc.x.array[:]
@@ -772,21 +806,21 @@ for iteration, current_time in enumerate(T):
                     dfx.fem.Constant(mesh, 0.0),
                 )
                 * deviatoric_stress,
-                W.element.interpolation_points(),
+                DW.element.interpolation_points(),
             )
             plastic_strain_inc.interpolate(plastic_strain_inc_expr)
             plastic_strain.x.array[:] += plastic_strain_inc.x.array[:]
             # check_nan("plastic_strain_inc", plastic_strain_inc.x.array)
             # check_nan("plastic_strain", plastic_strain.x.array)
 
-            # strain_update_expr = dfx.fem.Expression(
-            #     strain + constitutive.getStrain(displacement_inc) - plastic_strain_inc,
-            #     W.element.interpolation_points(),
-            # )
             strain_update_expr = dfx.fem.Expression(
-                total_strain - plastic_strain,
+                strain + constitutive.getStrain(displacement_inc) - plastic_strain_inc,
                 W.element.interpolation_points(),
             )
+            # strain_update_expr = dfx.fem.Expression(
+            #     total_strain - plastic_strain,
+            #     W.element.interpolation_points(),
+            # )
             strain.interpolate(strain_update_expr)
 
             strain_rate.x.array[:] = eq_plastic_strain_inc.x.array[:] / dt.value
@@ -794,29 +828,29 @@ for iteration, current_time in enumerate(T):
 
             yield_stress_update_expr = dfx.fem.Expression(
                 yield_stress + hardening_modulus * eq_plastic_strain_inc,
-                S.element.interpolation_points(),
+                DS.element.interpolation_points(),
             )
             yield_stress_new.interpolate(yield_stress_update_expr)
             # check_nan("yield_stress_new", yield_stress_new.x.array)
 
-            stress_regression_expr = dfx.fem.Expression(
-                (1 - crack_phase) ** 2
-                * (
-                    deviatoric_stress
-                    * yield_stress_new
-                    / (yield_stress_new + 3.0 * material.mu * eq_plastic_strain_inc)
-                    + ufl.tr(stress) / 3.0 * ufl.Identity(topology_dim)
-                ),
-                W.element.interpolation_points(),
-            )
-            stress.interpolate(stress_regression_expr)
+            # stress_regression_expr = dfx.fem.Expression(
+            #     (1 - crack_phase) ** 2
+            #     * (
+            #         deviatoric_stress
+            #         * yield_stress_new
+            #         / (yield_stress_new + 3.0 * material.mu * eq_plastic_strain_inc)
+            #         + ufl.tr(stress) / 3.0 * ufl.Identity(topology_dim)
+            #     ),
+            #     W.element.interpolation_points(),
+            # )
+            # stress.interpolate(stress_regression_expr)
 
             plastic_work_inc_expr = dfx.fem.Expression(
                 0.5
                 * (yield_stress_new + yield_stress)
                 * eq_plastic_strain_inc
                 / (1 - crack_phase) ** 2,
-                S.element.interpolation_points(),
+                DS.element.interpolation_points(),
             )
             plastic_work_inc.interpolate(plastic_work_inc_expr)
             plastic_work.x.array[:] += plastic_work_inc.x.array[:]
@@ -825,7 +859,13 @@ for iteration, current_time in enumerate(T):
             constitutive.getStressByStrain(strain, crack_phase, dim=topology_dim),
             W.element.interpolation_points(),
         )
+        stress_old.x.array[:] = stress.x.array[:]
         stress.interpolate(stress_update_expr)
+        stress_rate_expr = dfx.fem.Expression(
+            (stress - stress_old) / dt,
+            W.element.interpolation_points(),
+        )
+        stress_rate.interpolate(stress_rate_expr)
 
     strain_energy_positive.interpolate(constitutive.getStrainEnergyPositive(strain))
     constitutive.eigens_prepared = False
@@ -851,6 +891,25 @@ for iteration, current_time in enumerate(T):
     )
     acceleration_inc.interpolate(acceleration_inc_expr)
     acceleration.x.array[:] += acceleration_inc.x.array[:]
+
+    # jaumann_rate = sr.Jaumann()
+    spin_expr = dfx.fem.Expression(
+        0.5 * (ufl.nabla_grad(velocity) - ufl.nabla_grad(velocity).T),
+        W.element.interpolation_points(),
+    )
+    spin.interpolate(spin_expr)
+    jaumann_rate_expr = dfx.fem.Expression(
+        stress_rate - ufl.dot(spin, stress) + ufl.dot(stress, spin),
+        W.element.interpolation_points(),
+    )
+    jaumann_rate.interpolate(jaumann_rate_expr)
+
+    objective_stress_rate_update_expr = dfx.fem.Expression(
+        stress_old + jaumann_rate * dt,
+        W.element.interpolation_points(),
+    )
+    stress.interpolate(objective_stress_rate_update_expr)
+
     timers["update"].pause()
 
     timers["energy_history"].resume()
@@ -865,6 +924,11 @@ for iteration, current_time in enumerate(T):
     temperature_problem.solve()
     timers["temperature_solve"].pause()
 
+    timers["magnetic_solve"].resume()
+    if preset.magnetic:
+        magnetic_problem.solve()
+    timers["magnetic_solve"].pause()
+
     timers["normalize"].resume()
     # crack_phase.x.array[:] = np.clip(crack_phase.x.array, crack_phase_old.x.array, 1)
     crack_phase.x.array[:] = np.maximum(crack_phase.x.array, crack_phase_old.x.array)
@@ -876,10 +940,10 @@ for iteration, current_time in enumerate(T):
     if preset.verbose:
         u_tuple = getMaxMin(displacement.x.array)
         du_tuple = getMaxMin(displacement_inc.x.array)
+        d_tuple = getMaxMin(crack_phase.x.array)
+        dd_tuple = getMaxMin(crack_phase.x.array - crack_phase_old.x.array)
         p_tuple = getMaxMin(eq_plastic_strain.x.array)
         dp_tuple = getMaxMin(eq_plastic_strain_inc.x.array)
-        f_tuple = getMaxMin(crack_phase.x.array)
-        df_tuple = getMaxMin(crack_phase.x.array - crack_phase_old.x.array)
         t_tuple = getMaxMin(temperature.x.array)
         dt_tuple = getMaxMin(temperature.x.array - temperature_old.x.array)
         if rank == host:
@@ -894,10 +958,10 @@ for iteration, current_time in enumerate(T):
                 f"  u range: {u_tuple[0]:.2e}/{u_tuple[1]:.2e}, δu range: {du_tuple[0]:.2e}/{u_tuple[1]:.2e}"
             )
             print(
-                f"  p range: {p_tuple[0]:.2e}/{p_tuple[1]:.2e}, δp range: {dp_tuple[0]:.2e}/{dp_tuple[1]:.2e}"
+                f"  d range: {d_tuple[0]:.2e}/{d_tuple[1]:.2e}, δd range: {dd_tuple[0]:.2e}/{dd_tuple[1]:.2e}"
             )
             print(
-                f"  d range: {f_tuple[0]:.2e}/{f_tuple[1]:.2e}, δd range: {df_tuple[0]:.2e}/{df_tuple[1]:.2e}"
+                f"  p range: {p_tuple[0]:.2e}/{p_tuple[1]:.2e}, δp range: {dp_tuple[0]:.2e}/{dp_tuple[1]:.2e}"
             )
             print(
                 f"  t range: {t_tuple[0]:.2e}/{t_tuple[1]:.2e}, δt range: {dt_tuple[0]:.2e}/{dt_tuple[1]:.2e}"
@@ -914,8 +978,11 @@ for iteration, current_time in enumerate(T):
         displacement_vis.interpolate(displacement)
         strain_vis.interpolate(strain)
         stress_vis.interpolate(stress)
+        strain_rate_vis.interpolate(strain_rate)
+        spin_vis.interpolate(spin)
+        jaumann_rate_vis.interpolate(jaumann_rate)
         eq_stress_vis.interpolate(eq_stress)
-        yield_stress_vis.interpolate(yield_stress)
+        yield_stress_vis.interpolate(yield_stress_new)
         total_strain_vis.interpolate(total_strain)
         plastic_strain_vis.interpolate(plastic_strain)
         eq_plastic_strain_vis.interpolate(eq_plastic_strain)
@@ -969,10 +1036,11 @@ for iteration, current_time in enumerate(T):
             pvd_file.write_function(plastic_work_vis, current_time)
         if preset.out_xdmf:
             xdmf_file.write_function(displacement_vis, current_time)
-            # xdmf_file.write_function(strain, current_time)
             xdmf_file.write_function(strain_vis, current_time)
             xdmf_file.write_function(stress_vis, current_time)
-            # xdmf_file.write_function(von_mises, current_time)
+            xdmf_file.write_function(strain_rate_vis, current_time)
+            xdmf_file.write_function(spin_vis, current_time)
+            xdmf_file.write_function(jaumann_rate_vis, current_time)
             xdmf_file.write_function(eq_stress_vis, current_time)
             xdmf_file.write_function(yield_stress_vis, current_time)
             xdmf_file.write_function(total_strain_vis, current_time)

@@ -34,6 +34,8 @@ class Preset:
         self.animation = True
         self.screenshot = True
 
+        self.magnetic = False
+
         if material is None:
             self.material = Material.JohnsonCook()
         else:
@@ -69,15 +71,15 @@ Ti6Al4V.m = 1.0
 Ti6Al4V.melting_temperature = 1873.0
 Ti6Al4V.w0 = 150.0
 Ti6Al4V.Gc = 45.0  # ???
-Ti6Al4V.lf = 0.1
+Ti6Al4V.lf = 0.05
 Ti6Al4V.eta_f = 5e-5
 johnson_cook = Preset(name, Ti6Al4V)
 johnson_cook.output_directory = pathlib.Path("result") / name
 johnson_cook.dim = 2
 johnson_cook.w = 10
 johnson_cook.h = 4
-johnson_cook.mesh_x = int(4 * johnson_cook.w / Ti6Al4V.lf)  # 400
-johnson_cook.mesh_y = int(4 * johnson_cook.h / Ti6Al4V.lf)  # 160
+johnson_cook.mesh_x = int(2 * johnson_cook.w / Ti6Al4V.lf)  # 400
+johnson_cook.mesh_y = int(2 * johnson_cook.h / Ti6Al4V.lf)  # 160
 johnson_cook.crack_length = 4
 
 # Shear
@@ -90,7 +92,7 @@ johnson_cook.end_t = 4e-4
 # johnson_cook.u_r = 0.4
 # johnson_cook.end_t = 4e-4
 
-johnson_cook.num_iterations = 500
+johnson_cook.num_iterations = 100
 # johnson_cook.save_interval = 5
 # johnson_cook.screenshot = False
 johnson_cook.warp_factor = 0
@@ -103,8 +105,8 @@ johnson_cook_3d.dim = 3
 johnson_cook_3d.w = 10
 johnson_cook_3d.h = 4
 johnson_cook_3d.thickness = 1
-johnson_cook_3d.mesh_x = int(4 * johnson_cook_3d.w / Ti6Al4V.lf)  # 400
-johnson_cook_3d.mesh_y = int(4 * johnson_cook_3d.h / Ti6Al4V.lf)  # 160
+johnson_cook_3d.mesh_x = int(2 * johnson_cook_3d.w / Ti6Al4V.lf)  # 400
+johnson_cook_3d.mesh_y = int(2 * johnson_cook_3d.h / Ti6Al4V.lf)  # 160
 johnson_cook_3d.crack_length = 4
 
 # Shear
@@ -117,9 +119,9 @@ johnson_cook_3d.end_t = 4e-4
 # johnson_cook_3d.u_r = 0.4
 # johnson_cook_3d.end_t = 4e-4
 
-johnson_cook_3d.num_iterations = 1000
-johnson_cook_3d.save_interval = 5
-johnson_cook_3d.screenshot = False
+johnson_cook_3d.num_iterations = 200
+# johnson_cook_3d.save_interval = 5
+# johnson_cook_3d.screenshot = False
 johnson_cook_3d.warp_factor = 0
 
 # %% Miehe 2016, gradient plasticity theory, single edge notch shear

@@ -103,7 +103,7 @@ class ElastoPlastic_AmorMarigo2009(ConstitutiveRelation):
 
 class Elastoplastic(ConstitutiveRelation):
     def __init__(self, material: JohnsonCook):
-        super().__init__(name="Amor Marigo 2009", linear=False)
+        super().__init__(name="Default Elastoplastic", linear=False)
 
         self.linear = False
 

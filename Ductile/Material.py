@@ -1,4 +1,3 @@
-import numpy as np
 import ufl
 import dolfinx as dfx
 
@@ -34,6 +33,9 @@ class Ductile(Material):
         self.h = 300e3  # Hardening modulus, kg mm / s^2 / mm^2
         self.eta_p = 6e-3  # Plastic viscosity parameter, kg mm / s^2 / mm^2 s
         self.lp = 0.78125  # Plastic length scale, mm
+
+        # Electromagnetic properties
+        self.permittivity = 8.854e-12  # Permittivity, F/m
 
     def hardening(self, p):
         return (
@@ -75,6 +77,9 @@ class JohnsonCook:
         self.eta_f = 5e-2  # kg / mm / s
         # self.beta = 2.8 # Useless for now
 
+        # Electromagnetic properties
+        self.permittivity = 8.854e-12  # Permittivity, F/m
+
     def getYieldStress(
         self, damage, equivalent_plastic_strain, strain_rate=1.0, temperature=298.0
     ) -> dfx.fem.Function:
@@ -106,7 +111,7 @@ class JohnsonCook:
         #     temperature = self.reference_temperature
 
         return ufl.conditional(
-            ufl.gt(equivalent_plastic_strain, 0),
+            ufl.gt(equivalent_plastic_strain, 0.0),
             (1 - damage) ** 2
             * (
                 (self.n * self.B * equivalent_plastic_strain ** (self.n - 1))
@@ -117,5 +122,5 @@ class JohnsonCook:
                     / (self.melting_temperature - self.reference_temperature)
                 )
             ),
-            0,
+            0.0,
         )
