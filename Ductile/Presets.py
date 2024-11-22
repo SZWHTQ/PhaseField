@@ -92,8 +92,8 @@ johnson_cook.end_t = 4e-4
 # johnson_cook.u_r = 0.4
 # johnson_cook.end_t = 4e-4
 
-johnson_cook.num_iterations = 100
-# johnson_cook.save_interval = 5
+johnson_cook.num_iterations = 200
+# johnson_cook.save_interval = 10
 # johnson_cook.screenshot = False
 johnson_cook.warp_factor = 0
 

@@ -55,12 +55,12 @@ if rank == host:
     dfx.log.set_log_level(dfx.log.LogLevel.INFO)
 
 # %% Create the mesh
-mesh = dfx.mesh.create_rectangle(
-    comm,
-    [np.array([-preset.w / 2, -preset.h / 2]), np.array([preset.w / 2, preset.h / 2])],
-    [preset.mesh_x, preset.mesh_y],
-    cell_type=dfx.mesh.CellType.quadrilateral,
-)
+# mesh = dfx.mesh.create_rectangle(
+#     comm,
+#     [np.array([-preset.w / 2, -preset.h / 2]), np.array([preset.w / 2, preset.h / 2])],
+#     [preset.mesh_x, preset.mesh_y],
+#     cell_type=dfx.mesh.CellType.quadrilateral,
+# )
 
 gmsh.initialize()
 if rank == host:
@@ -569,7 +569,10 @@ warp_factor = preset.warp_factor
 
 
 def getLoad(time):
-    return time / preset.end_t * preset.u_r
+    def smooth(xi):
+        return xi**3 * (10 - 15 * xi + 6 * xi * xi)
+
+    return preset.u_r * smooth(time / preset.end_t)
 
 
 def getMaxMin(u: dfx.fem.Function):
@@ -642,7 +645,7 @@ if preset.out_xdmf:
 if preset.animation and have_pyvista:
     displacement_vis.interpolate(displacement)
     crack_phase_vis.interpolate(crack_phase)
-    eq_plastic_strain_vis.interpolate(eq_plastic_strain)
+    # eq_plastic_strain_vis.interpolate(eq_plastic_strain)
 
     points_num = mesh.geometry.x.shape[0]
 
