@@ -11,11 +11,14 @@ import matplotlib.pyplot as plt
 import tqdm.autonotebook
 
 from pathlib import Path
+import os
 
 import Material
 import Constitutive
 import Problem
 import Util
+
+os.environ["OMP_NUM_THREADS"] = "1"
 
 result_dir = Path("result/result_mpi")
 if not result_dir.exists():

@@ -208,6 +208,7 @@ class IsotropicPlasticity(Displacement):
         converged = False
         host = 0
         rank = self._comm.Get_rank()
+        self._solve_call_time += 1
 
         self.displacement_inc.x.array[:] = 0.0
 
@@ -267,7 +268,7 @@ class IsotropicPlasticity(Displacement):
                 con.stressProjection(strain_inc)
             )
 
-            Util.localProject(_stress_vector, con.W, con.stress_vector)
+            Util.localProject(Util.macaulayBracket(_stress_vector), con.W, con.stress_vector)
             Util.localProject(_n_elastic_vector, con.W, con.n_elastic_vector)
             Util.localProject(_beta, con.S, con.beta)
 
@@ -357,8 +358,6 @@ class IsotropicPlasticity(Displacement):
             con.S,
             con.equivalent_stress,
         )
-
-        self._solve_call_time += 1
 
         return num_iteration
 
