@@ -8,17 +8,6 @@ from mpi4py import MPI
 
 import numpy as np
 
-from pathlib import Path
-
-from memory_profiler import profile
-
-result_dir = Path("result/memory_profiling/serial")
-if not result_dir.exists():
-    result_dir.mkdir(exist_ok=True, parents=True)
-comm = MPI.COMM_WORLD
-rank = comm.Get_rank()
-host = 0
-
 
 def macaulayBracket(x):
     return (x + abs(x)) / 2
@@ -40,9 +29,8 @@ def getLamesParameters(E: float, nu: float) -> tuple[float, float]:
     return lame, mu
 
 
-@profile(stream=open(result_dir / f"memory_profiling_localProject_{rank}.txt", "w"))
 def localProject(
-    v: ufl.Form, V: dfx.fem.FunctionSpace, u: dfx.fem.Function = None
+    v: ufl.Form, u: dfx.fem.Function = None, V: dfx.fem.FunctionSpace = None
 ) -> dfx.fem.Function | None:
     """
     Project a UFL expression onto a function space in DOLFINx.
@@ -56,7 +44,11 @@ def localProject(
     DOLFINx Function containing the projection result if `u` is None.
     """
     if u is None:
+        if V is None:
+            raise ValueError("FunctionSpace is required when u is not provided.")
         u = dfx.fem.Function(V)
+    if V is None:
+        V = u.function_space
     dx = ufl.Measure("dx", domain=V.mesh)
 
     dv = ufl.TrialFunction(V)

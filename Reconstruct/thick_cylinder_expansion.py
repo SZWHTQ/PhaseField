@@ -23,7 +23,7 @@ from memory_profiler import profile
 
 os.environ["OMP_NUM_THREADS"] = "1"
 
-result_dir = Path("result/memory_profiling/serial")
+result_dir = Path("result/memory_profiling/mpi")
 if not result_dir.exists():
     result_dir.mkdir(exist_ok=True, parents=True)
 
@@ -44,11 +44,11 @@ def thick_cylinder():
         dfx.log.set_output_file(str(result_dir / "solve.log"))
 
     # %% Create the material
-    lame, shear_modulus = Util.getLamesParameters(E=70e3, nu=0.3)
+    lame, mu = Util.getLamesParameters(E=70e3, nu=0.3)
     material = Material.JohnsonCookMaterial(
         mass_density=None,
         lame=lame,
-        shear_modulus=shear_modulus,
+        shear_modulus=mu,
         initial_yield_stress=206.0,
         strength_coefficient=505.0,
         strain_rate_strength_coefficient=0.01,
@@ -195,8 +195,7 @@ def thick_cylinder():
             total=load_steps.size  # , desc=f"Solving T={T.value:.3f}"
         )
     for i, t in enumerate(load_steps):
-        load = getLoad(t)
-        T.value = load
+        T.value = getLoad(t)
 
         problem.assemble()
 

@@ -19,6 +19,16 @@ from pathlib import Path
 import shutil
 
 
+from memory_profiler import profile
+
+result_dir = Path("result/memory_profiling/serial")
+if not result_dir.exists():
+    result_dir.mkdir(exist_ok=True, parents=True)
+comm = MPI.COMM_WORLD
+rank = comm.Get_rank()
+host = 0
+
+
 class Problem:
     def __init__(
         self,
@@ -48,7 +58,7 @@ class Problem:
         self.fdim = self.tdim - 1
 
 
-class Displacement(Problem):
+class DisplacementProblem(Problem):
     def __init__(
         self,
         constitutive: Constitutive.Constitutive,
@@ -57,16 +67,15 @@ class Displacement(Problem):
         dx: ufl.Measure = None,
         metadata: dict = None,
     ):
+        self._constitutive = constitutive
+        self._material = self._constitutive._material
         super().__init__(
-            mesh=constitutive._mesh,
+            mesh=self._constitutive._mesh,
             element_type=element_type,
             degree=degree,
             dx=dx,
             metadata=metadata,
         )
-
-        self._constitutive = constitutive
-        self._material = self._constitutive._material
 
         self.V = dfx.fem.functionspace(
             self._mesh, (self._element_type, self._degree, (self.tdim,))
@@ -75,10 +84,10 @@ class Displacement(Problem):
         self.displacement = dfx.fem.Function(self.V, name="Displacement")
 
 
-class IsotropicPlasticity(Displacement):
+class IsotropicPlasticProblem(DisplacementProblem):
     def __init__(
         self,
-        constitutive: Constitutive.IsotropicJohnsonCook,
+        constitutive: Constitutive.IsotropicJohnsonCook2DModel,
         element_type: str = "Lagrange",
         degree: int = 1,
         dx: ufl.Measure = None,
@@ -92,8 +101,8 @@ class IsotropicPlasticity(Displacement):
             metadata=metadata,
         )
 
-        assert isinstance(self._material, Material.JohnsonCook)
-        assert isinstance(self._constitutive, Constitutive.IsotropicJohnsonCook)
+        assert isinstance(self._material, Material.JohnsonCookMaterial)
+        assert isinstance(self._constitutive, Constitutive.IsotropicJohnsonCook2DModel)
 
         self.displacement_inc = dfx.fem.Function(self.V, name="Displacement increment")
         self.iteration_correction = dfx.fem.Function(
@@ -121,7 +130,7 @@ class IsotropicPlasticity(Displacement):
         )
 
         ## Config
-        self.max_iteration = 100
+        self.max_iterations = 100
         self.tolerance = 1e-6
         self.iteration_out = False
         # Can't work properly right now, #TODO: Fix this in the future
@@ -174,7 +183,8 @@ class IsotropicPlasticity(Displacement):
 
         if (
             self._mesh.comm.rank == 0
-        ):  # TODO: Shall be changed to the host rank, think about a better way
+        ):  # Shall be changed to the host rank, think about a better way
+            # TODO: Change write and log to a standalone class
             self.log_file = open(self.result_dir / self.log_filename, "w")
 
     def setBCs(self, bcs):
@@ -195,12 +205,13 @@ class IsotropicPlasticity(Displacement):
         pc = self._solver.getPC()
         pc.setType(PETSc.PC.Type.LU)
 
+    @profile(stream=open(result_dir / f"memory_profiling_solve_{rank}.txt", "w"))
     def solve(self):
         con = self._constitutive
         assert isinstance(
-            con, Constitutive.IsotropicJohnsonCook
+            con, Constitutive.IsotropicJohnsonCook2DModel
         ), (
-            "Constitutive is not IsotropicJohnsonCook"
+            "Constitutive is not IsotropicJohnsonCookModel"
         )  # Type check just for syntax highlighting and autocompletion
 
         num_iteration = 0
@@ -213,12 +224,12 @@ class IsotropicPlasticity(Displacement):
         self.displacement_inc.x.array[:] = 0.0
 
         Util.localProject(
-            con._getYieldStress(),
+            con.getYieldStress(),
             con.S,
             con.yield_stress,
         )
         Util.localProject(
-            con._getHardening(),
+            con.getHardening(),
             con.S,
             con.hardening,
         )
@@ -245,7 +256,7 @@ class IsotropicPlasticity(Displacement):
                 # Use Agg backend for non-interactive plotting
                 canvas = FigureCanvas(fig)
 
-        while (not converged) and num_iteration < self.max_iteration:
+        while (not converged) and num_iteration < self.max_iterations:
             with self._b.localForm() as b_loc:
                 b_loc.set(0.0)
             self._A.zeroEntries()
@@ -268,7 +279,7 @@ class IsotropicPlasticity(Displacement):
                 con.stressProjection(strain_inc)
             )
 
-            Util.localProject(Util.macaulayBracket(_stress_vector), con.W, con.stress_vector)
+            Util.localProject(_stress_vector, con.W, con.stress_vector)
             Util.localProject(_n_elastic_vector, con.W, con.n_elastic_vector)
             Util.localProject(_beta, con.S, con.beta)
 
@@ -312,7 +323,7 @@ class IsotropicPlasticity(Displacement):
         else:
             if self.iteration_out:
                 iteration_result.close()
-            if num_iteration == self.max_iteration:
+            if num_iteration == self.max_iterations:
                 if rank == host:
                     if self.verbose:
                         terminal_size = shutil.get_terminal_size()
@@ -359,13 +370,24 @@ class IsotropicPlasticity(Displacement):
             con.equivalent_stress,
         )
 
+        self._post_solve()
+
         return num_iteration
+
+    def _post_solve(self):
+        import gc
+
+        opts = PETSc.Options()
+        opts.clear()
+        opts.destroy()
+        del opts
+        gc.collect()
 
     def write(self, time: float = 0):
         assert isinstance(
-            self._constitutive, Constitutive.IsotropicJohnsonCook
+            self._constitutive, Constitutive.IsotropicJohnsonCook2DModel
         ), (
-            "Constitutive is not IsotropicJohnsonCook"
+            "Constitutive is not IsotropicJohnsonCookModel"
         )  # Type check just for syntax highlighting and autocompletion
         self._displacement_vis.interpolate(self.displacement)
         self._equivalent_plastic_strain_vis.interpolate(

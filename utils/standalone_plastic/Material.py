@@ -1,13 +1,20 @@
-import dataclasses
+# import dataclasses
+from dataclasses import dataclass
 
-@dataclasses.dataclass
+
+@dataclass
 class Material:
-    rho: float
-    lame: float
-    mu: float
+    pass
 
-@dataclasses.dataclass
-class JohnsonCook(Material):
+@dataclass
+class ElasticMaterial(Material):
+    mass_density: float
+    lame: float
+    shear_modulus: float
+
+
+@dataclass
+class JohnsonCookMaterial(ElasticMaterial):
     initial_yield_stress: float
     strength_coefficient: float
     strain_rate_strength_coefficient: float

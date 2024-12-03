@@ -34,17 +34,15 @@ class Constitutive:
         )
 
 
-class IsotropicJohnsonCook(Constitutive):
+class IsotropicJohnsonCook2DModel(Constitutive):
     """
     Isotropic plasticity constitutive model
     Plane strain model
-    Args:
-        Constitutive (_type_): _description_
     """
 
     def __init__(
         self,
-        material: Material.JohnsonCook,
+        material: Material.JohnsonCookMaterial,
         mesh: dfx.mesh.Mesh,
         element_type: str = None,
         degree: int = 1,
@@ -52,8 +50,8 @@ class IsotropicJohnsonCook(Constitutive):
         super().__init__(material, mesh, element_type, degree)
 
         assert isinstance(
-            self._material, Material.JohnsonCook
-        ), "Material is not JohnsonCook"
+            self._material, Material.JohnsonCookMaterial
+        ), "Material is not JohnsonCookMaterial"
 
         self.W = dfx.fem.functionspace(
             self._mesh, (self._element_type, self._degree, (self._tdim * self._tdim,))
@@ -94,13 +92,25 @@ class IsotropicJohnsonCook(Constitutive):
         )
 
     def _getElasticStress(self, strain):
+        assert isinstance(
+            self._material, Material.JohnsonCookMaterial
+        ), (
+            "Material is not JohnsonCookMaterial"
+        )  # Type check just for syntax highlighting and autocompletion
+
         return (
             self._material.lame * ufl.tr(strain) * ufl.Identity(3)  # 3 for Plane strain
-            + 2 * self._material.mu * strain
+            + 2 * self._material.shear_modulus * strain
         )
 
     def getStress(self, displacement):
-        mu = self._material.mu
+        assert isinstance(
+            self._material, Material.JohnsonCookMaterial
+        ), (
+            "Material is not JohnsonCookMaterial"
+        )  # Type check just for syntax highlighting and autocompletion
+
+        mu = self._material.shear_modulus
         # H = self._getHardeningModulus()
         H = self.hardening
         e = self.getStrain(displacement)
@@ -117,9 +127,15 @@ class IsotropicJohnsonCook(Constitutive):
         )
 
     def stressProjection(self, strain_inc):
+        assert isinstance(
+            self._material, Material.JohnsonCookMaterial
+        ), (
+            "Material is not JohnsonCookMaterial"
+        )  # Type check just for syntax highlighting and autocompletion
+
         Y = self.yield_stress
         H = self.hardening
-        mu = self._material.mu
+        mu = self._material.shear_modulus
 
         stress_old = self.asThreeDimensionalTensor(self.stress_vector_old)
         stress_trial = stress_old + self._getElasticStress(strain_inc)
@@ -160,13 +176,13 @@ class IsotropicJohnsonCook(Constitutive):
             ]
         )
 
-    def _getYieldStress(self):
+    def getYieldStress(self):
         m = self._material
 
         assert isinstance(
-            m, Material.JohnsonCook
+            m, Material.JohnsonCookMaterial
         ), (
-            "Material is not JohnsonCook"
+            "Material is not JohnsonCookMaterial"
         )  # Type check just for syntax highlighting and autocompletion
 
         y = (
@@ -182,13 +198,13 @@ class IsotropicJohnsonCook(Constitutive):
         )
         return y
 
-    def _getHardening(self):
+    def getHardening(self):
         m = self._material
 
         assert isinstance(
-            m, Material.JohnsonCook
+            m, Material.JohnsonCookMaterial
         ), (
-            "Material is not JohnsonCook"
+            "Material is not JohnsonCookMaterial"
         )  # Type check just for syntax highlighting and autocompletion
 
         _h = (
