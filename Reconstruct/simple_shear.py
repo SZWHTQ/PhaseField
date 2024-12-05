@@ -17,7 +17,7 @@ import Problem
 
 os.environ["OMP_NUM_THREADS"] = "1"
 
-result_dir = Path("result/simple_shear.0/test_serial")
+result_dir = Path("result/simple_shear/mpi")
 if not result_dir.exists():
     result_dir.mkdir(exist_ok=True, parents=True)
 
@@ -32,7 +32,7 @@ Ti6Al4V = Material.DuctileFractureMaterial(
     mass_density=4.43e-9,
     lame=68501.40618722378,
     shear_modulus=41984.732824427476,
-    viscosity=1e-3,
+    viscosity=1e-6,
     initial_yield_stress=1000.0,
     strength_coefficient=1000.0,
     strain_rate_strength_coefficient=0.0,
@@ -149,7 +149,7 @@ gmsh.finalize()
 constitutive = Constitutive.DuctileFracturePrincipleStrainDecomposition(Ti6Al4V, mesh)
 
 metadata = {"quadrature_degree": 2, "quadrature_scheme": "default"}
-dt = dfx.fem.Constant(mesh, 1.0)
+dt = dfx.fem.Constant(mesh, 0.0)
 problem = Problem.DuctileFractureProblem(
     constitutive=constitutive, dt=dt, metadata=metadata
 )
@@ -202,7 +202,7 @@ def getLoad(t):
 
 problem.result_dir = result_dir
 problem.result_filename = "ductile_fracture"
-problem.isotropic_plastic_problem.max_iterations = 1000
+problem.isotropic_plastic_problem.max_iterations = 100
 problem.isotropic_plastic_problem.tolerance = 1e-5
 problem.isotropic_plastic_problem.iteration_out = True
 problem.prepare()
@@ -236,4 +236,4 @@ for i, t in enumerate(load_steps):
 
     if rank == host:
         progress.update(1)
-        progress.set_description(f"{L=:.3e} solved in {num_it} iterations")
+        progress.set_description(f"{L=:.3e} solved {num_it} its")

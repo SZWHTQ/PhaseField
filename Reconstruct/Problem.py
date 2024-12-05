@@ -574,152 +574,33 @@ class DuctileFractureSubProblem(PlaneStrainProblem):
 
         # For crack phase field sub problem
 
-        Util.localProject(
-            con.getElasticStrainEnergyPositive(),
-            con.elastic_strain_energy_positive,
-        )
-        Util.localProject(
-            con.getCrackDrivenForce(),
-            con.crack_driven_force,
+        # Util.localProject(
+        #     con.getElasticStrainEnergyPositive(),
+        #     con.elastic_strain_energy_positive,
+        # )
+        con.elastic_strain_energy_positive.interpolate(
+            dfx.fem.Expression(
+                con.getElasticStrainEnergyPositive(),
+                con.elastic_strain_energy_positive.function_space.element.interpolation_points(),
+            )
         )
 
-        # con.elastic_strain_energy_positive.interpolate(
-        #     dfx.fem.Expression(
-        #         con.getElasticStrainEnergyPositive(),
-        #         con.elastic_strain_energy_positive.function_space.element.interpolation_points(),
-        #     )
+        # Util.localProject(
+        #     con.getCrackDrivenForce(),
+        #     con.crack_driven_force,
         # )
-        # con.crack_driven_force.interpolate(
-        #     dfx.fem.Expression(
-        #         con.getCrackDrivenForce(),
-        #         con.crack_driven_force.function_space.element.interpolation_points(),
-        #     )
-        # )
+        con.crack_driven_force.interpolate(
+            dfx.fem.Expression(
+                con.getCrackDrivenForce(),
+                con.crack_driven_force.function_space.element.interpolation_points(),
+            )
+        )
 
         self._problem.solve()
 
         self.crack_phase.x.array[:] = np.maximum(
             self.crack_phase.x.array, self.crack_phase_old.x.array
         )
-
-    # def solve(self):
-    #     con: Constitutive.IsotropicJohnsonCook2DModel = self._constitutive
-
-    #     num_iteration = 0
-    #     correction_norm = 0
-    #     converged = False
-    #     host = 0
-    #     rank = self._comm.Get_rank()
-
-    #     con.elastic_strain_energy_positive.interpolate(
-    #         dfx.fem.Expression(
-    #             con.getElasticStrainEnergyPositive(),
-    #             con.elastic_strain_energy_positive.function_space.element.interpolation_points(),
-    #         )
-    #     )
-    #     con.crack_driven_force.interpolate(
-    #         dfx.fem.Expression(
-    #             con.getCrackDrivenForce(),
-    #             con.crack_driven_force.function_space.element.interpolation_points(),
-    #         )
-    #     )
-
-    #     if self.iteration_out:
-    #         iteration_result = dfx.io.XDMFFile(
-    #             self._comm,
-    #             self.result_dir / f"crack_phase_iteration_{self._solve_call_time}.xdmf",
-    #             "w",
-    #         )
-    #         iteration_result.write_mesh(self._mesh)
-
-    #     if rank == host:
-    #         self.log_file.write(f"Increment {self._solve_call_time}\n")
-
-    #     while (not converged) and num_iteration < self.max_iterations:
-    #         with self._b.localForm() as b_loc:
-    #             b_loc.set(0.0)
-    #         self._A.zeroEntries()
-    #         petsc.assemble_matrix(self._A, self._a, bcs=self._bcs)
-    #         self._A.assemble()
-
-    #         petsc.assemble_vector(self._b, self._L)
-    #         petsc.apply_lifting(self._b, [self._a], [self._bcs])
-    #         self._b.ghostUpdate(
-    #             addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE
-    #         )
-    #         petsc.set_bc(self._b, self._bcs)
-
-    #         self._solver.solve(self._b, self.iteration_correction.x.petsc_vec)
-    #         self.iteration_correction.x.scatter_forward()
-
-    #         self.crack_phase.x.array[:] += self.iteration_correction.x.array[:]
-
-    #         if self.iteration_out:
-    #             iteration_result.write_function(
-    #                 self.iteration_correction, t=num_iteration
-    #             )
-
-    #         # self._comm.Barrier()
-    #         correction_norm_old = correction_norm
-    #         correction_norm = Util.getL2Norm(self.iteration_correction)
-    #         converged = correction_norm < self.tolerance
-    #         converged = self._comm.allreduce(converged, op=MPI.LAND)
-
-    #         if rank == host:
-    #             if self.verbose:
-    #                 terminal_size = shutil.get_terminal_size()
-    #                 width = terminal_size.columns
-    #                 # print(" " * width, end=self._log_info_line_end_with, flush=True)
-    #                 print(
-    #                     f"    iteration {num_iteration}: r = {correction_norm:.3e}, dr = {(correction_norm - correction_norm_old):.3e}",
-    #                     # end=self._log_info_line_end_with,
-    #                     flush=True,
-    #                 )
-    #             self.log_file.write(
-    #                 f"iteration {num_iteration}: r = {correction_norm:.3e}, dr = {(correction_norm - correction_norm_old):.3e}\n"
-    #             )
-    #             # self.log_file.flush()
-
-    #             self.crack_phase.x.array[:] = np.maximum(
-    #                 self.crack_phase.x.array, self.crack_phase_old.x.array
-    #             )
-    #             self.crack_phase_old.x.array[:] = self.crack_phase.x.array[:]
-
-    #             con._crack_phase.x.array[:] = self.crack_phase.x.array[:]
-
-    #         num_iteration += 1
-    #         self._comm.Barrier()
-    #     else:
-    #         if self.iteration_out:
-    #             iteration_result.close()
-    #         if num_iteration == self.max_iterations:
-    #             if rank == host:
-    #                 if self.verbose:
-    #                     terminal_size = shutil.get_terminal_size()
-    #                     width = terminal_size.columns
-    #                     print(" " * width, end=self._log_info_line_end_with, flush=True)
-    #                     print(
-    #                         f"   iteration {num_iteration}: r = {correction_norm:.3e}, dr = {(correction_norm - correction_norm_old):.3e}",
-    #                     )
-    #                 self.log_file.write(
-    #                     f"iteration {num_iteration}: r = {correction_norm:.3e}, dr = {(correction_norm - correction_norm_old):.3e}\n"
-    #                 )
-    #             raise RuntimeError("Failed to converge")
-    #         else:
-    #             if rank == host:
-    #                 if self.verbose:
-    #                     # print(" " * width, end=self._log_info_line_end_with, flush=True)
-    #                     print(
-    #                         f"  Converged at iteration {num_iteration-1}: r = {correction_norm:.3e}"
-    #                     )
-    #                 self.log_file.write(
-    #                     f"Converged at iteration {num_iteration-1}: r = {correction_norm:.3e}\n\n"
-    #                 )
-    #                 self.log_file.flush()
-
-    #     self._solve_call_time += 1
-
-    #     return num_iteration
 
     def write(self, time: float = 0):
         self._crack_phase_vis.interpolate(self.crack_phase)
@@ -772,6 +653,9 @@ class DuctileFractureProblem(PlaneStrainProblem):
 
     def prepare(self):
         super().prepare()
+        assert isinstance(
+            self._constitutive, Constitutive.DuctileFracturePrincipleStrainDecomposition
+        )
 
         self.result_file = dfx.io.VTXWriter(
             self._comm,
@@ -790,6 +674,7 @@ class DuctileFractureProblem(PlaneStrainProblem):
                 self.isotropic_plastic_problem._velocity_vis,
                 self.ductile_fracture_sub_problem._crack_phase_vis,
                 self.ductile_fracture_sub_problem._crack_driven_force_vis,
+                self._constitutive._principle_strain_vis,
             ],
             engine="BP4",
         )
@@ -907,16 +792,19 @@ class DuctileFractureProblem(PlaneStrainProblem):
             strain_inc = self._constitutive.getStrain(pp.displacement_inc)
             (
                 _stress_vector,
-                _n_elastic_vector,
-                _beta,
-                _elastic_strain_vector,
+                # _elastic_strain_vector,
                 _equivalent_plastic_strain_inc,
                 _plastic_work_inc,
             ) = con.stressProjection(strain_inc)
 
-            Util.localProject(_stress_vector, con.stress_vector)
-            Util.localProject(_n_elastic_vector, con.n_elastic_vector)
-            Util.localProject(_beta, con.beta)
+            # Util.localProject(_stress_vector, con.stress_vector)
+            con.stress_vector.interpolate(
+                dfx.fem.Expression(
+                    _stress_vector,
+                    con.W.element.interpolation_points(),
+                )
+            )
+
             # Util.localProject(
             #     pp._getAcceleration(
             #         pp.displacement_inc,
@@ -925,33 +813,6 @@ class DuctileFractureProblem(PlaneStrainProblem):
             #         pp.dt,
             #     ),
             #     pp.acceleration_inc,
-            # )
-            # Util.localProject(
-            #     pp._getVelocity(
-            #         pp.displacement_inc,
-            #         pp.displacement_inc_old,
-            #         pp.dt,
-            #     ),
-            #     pp.velocity_inc,
-            # )
-
-            # con.stress_vector.interpolate(
-            #     dfx.fem.Expression(
-            #         _stress_vector,
-            #         con.stress_vector.function_space.element.interpolation_points(),
-            #     )
-            # )
-            # con.n_elastic_vector.interpolate(
-            #     dfx.fem.Expression(
-            #         _n_elastic_vector,
-            #         con.n_elastic_vector.function_space.element.interpolation_points(),
-            #     )
-            # )
-            # con.beta.interpolate(
-            #     dfx.fem.Expression(
-            #         _beta,
-            #         con.beta.function_space.element.interpolation_points(),
-            #     )
             # )
             pp.acceleration_inc.interpolate(
                 dfx.fem.Expression(
@@ -964,6 +825,18 @@ class DuctileFractureProblem(PlaneStrainProblem):
                     pp.V.element.interpolation_points(),
                 )
             )
+            pp.acceleration.x.array[:] = (
+                pp.acceleration_old.x.array[:] + pp.acceleration_inc.x.array[:]
+            )
+
+            # Util.localProject(
+            #     pp._getVelocity(
+            #         pp.displacement_inc,
+            #         pp.displacement_inc_old,
+            #         pp.dt,
+            #     ),
+            #     pp.velocity_inc,
+            # )
             pp.velocity_inc.interpolate(
                 dfx.fem.Expression(
                     pp._getVelocity(
@@ -974,15 +847,11 @@ class DuctileFractureProblem(PlaneStrainProblem):
                     pp.V.element.interpolation_points(),
                 )
             )
-
-            pp.acceleration.x.array[:] = (
-                pp.acceleration_old.x.array[:] + pp.acceleration_inc.x.array[:]
-            )
             pp.velocity.x.array[:] = (
                 pp.velocity_old.x.array[:] + pp.velocity_inc.x.array[:]
             )
 
-            Util.localProject(_elastic_strain_vector, con.elastic_strain_vector)
+            # Util.localProject(_elastic_strain_vector, con.elastic_strain_vector)
             # con.elastic_strain_vector.interpolate(
             #     dfx.fem.Expression(
             #         _elastic_strain_vector,
@@ -990,33 +859,33 @@ class DuctileFractureProblem(PlaneStrainProblem):
             #     )
             # )
 
-            Util.localProject(
-                _equivalent_plastic_strain_inc,
-                con.equivalent_plastic_strain_inc,
-            )
-            # con.equivalent_plastic_strain_inc.interpolate(
-            #     dfx.fem.Expression(
-            #         _equivalent_plastic_strain_inc,
-            #         con.S.element.interpolation_points(),
-            #     )
+            # Util.localProject(
+            #     Util.macaulayBracket(_equivalent_plastic_strain_inc),
+            #     con.equivalent_plastic_strain_inc,
             # )
+            con.equivalent_plastic_strain_inc.interpolate(
+                dfx.fem.Expression(
+                    Util.macaulayBracket(_equivalent_plastic_strain_inc),
+                    con.S.element.interpolation_points(),
+                )
+            )
             con.equivalent_plastic_strain.x.array[:] = (
                 con.equivalent_plastic_strain_old.x.array[:]
-                + Util.macaulayBracket(con.equivalent_plastic_strain_inc.x.array[:])
+                + con.equivalent_plastic_strain_inc.x.array[:]
             )
 
-            Util.localProject(
-                _plastic_work_inc
-                / (1 - self.ductile_fracture_sub_problem.crack_phase) ** 2,
-                con.plastic_work_inc,
-            )
-            # con.plastic_work_inc.interpolate(
-            #     dfx.fem.Expression(
-            #         _plastic_work_inc
-            #         / (1 - self.ductile_fracture_sub_problem.crack_phase) ** 2,
-            #         con.S.element.interpolation_points(),
-            #     )
+            # Util.localProject(
+            #     Util.macaulayBracket(_plastic_work_inc)
+            #     / (1 - self.ductile_fracture_sub_problem.crack_phase) ** 2,
+            #     con.plastic_work_inc,
             # )
+            con.plastic_work_inc.interpolate(
+                dfx.fem.Expression(
+                    Util.macaulayBracket(_plastic_work_inc)
+                    / (1 - self.ductile_fracture_sub_problem.crack_phase) ** 2,
+                    con.DS.element.interpolation_points(),
+                )
+            )
             con.plastic_work.x.array[:] = (
                 con.plastic_work_old.x.array[:] + con.plastic_work_inc.x.array[:]
             )
@@ -1154,38 +1023,36 @@ class DuctileFractureProblem(PlaneStrainProblem):
         return num_iteration
 
     def write(self, time: float = 0):
+        con = self._constitutive
         assert isinstance(
-            self._constitutive, Constitutive.DuctileFracture
+            con, Constitutive.DuctileFracturePrincipleStrainDecomposition
         ), (
-            "Constitutive is not IsotropicJohnsonCookModel"
+            "Constitutive is not DuctileFracturePrincipleStrainDecomposition"
         )  # Type check just for syntax highlighting and autocompletion
         self.isotropic_plastic_problem._displacement_vis.interpolate(
             self.isotropic_plastic_problem.displacement
         )
         self.isotropic_plastic_problem._equivalent_plastic_strain_vis.interpolate(
-            self._constitutive.equivalent_plastic_strain
+            con.equivalent_plastic_strain
         )
-        self.isotropic_plastic_problem._stress_vector_vis.interpolate(
-            self._constitutive.stress_vector
-        )
+        self.isotropic_plastic_problem._stress_vector_vis.interpolate(con.stress_vector)
         self.isotropic_plastic_problem._equivalent_stress_vis.interpolate(
-            self._constitutive.equivalent_stress
+            con.equivalent_stress
         )
         self.isotropic_plastic_problem._yield_stress.interpolate(
-            self._constitutive.yield_stress
+            dfx.fem.Expression(
+                con.yield_stress + con.hardening * con.equivalent_plastic_strain_inc,
+                con.S.element.interpolation_points(),
+            )
         )
-        self.isotropic_plastic_problem._hardening.interpolate(
-            self._constitutive.hardening
-        )
+        self.isotropic_plastic_problem._hardening.interpolate(con.hardening)
         self.isotropic_plastic_problem._elastic_strain_vis.interpolate(
-            self._constitutive.elastic_strain_vector
+            con.elastic_strain_vector
         )
         self.isotropic_plastic_problem._elastic_strain_energy_positive_vis.interpolate(
-            self._constitutive.elastic_strain_energy_positive
+            con.elastic_strain_energy_positive
         )
-        self.isotropic_plastic_problem._plastic_work_vis.interpolate(
-            self._constitutive.plastic_work
-        )
+        self.isotropic_plastic_problem._plastic_work_vis.interpolate(con.plastic_work)
         self.isotropic_plastic_problem._acceleration_vis.interpolate(
             self.isotropic_plastic_problem.acceleration
         )
@@ -1196,8 +1063,10 @@ class DuctileFractureProblem(PlaneStrainProblem):
             self.ductile_fracture_sub_problem.crack_phase
         )
         self.ductile_fracture_sub_problem._crack_driven_force_vis.interpolate(
-            self._constitutive.crack_driven_force
+            con.crack_driven_force
         )
+
+        con._principle_strain_vis.x.array[:] = con.principle_strain.flatten()
 
         self.result_file.write(time)
 

@@ -239,7 +239,7 @@ class DuctileFracture(IsotropicJohnsonCook2DModel):
             type(self._material), Material.DuctileFractureMaterial
         ), f"Material {self._material.__class__} is not DuctileFractureMaterial"
 
-        self.DS = dfx.fem.functionspace(self._mesh, ("DG", self._degree))
+        self.DS = dfx.fem.functionspace(self._mesh, ("DG", 0))
 
         self.elastic_strain_vector = dfx.fem.Function(self.W, name="Elastic strain")
         self.elastic_strain_vector_old = dfx.fem.Function(self.W)
@@ -248,11 +248,11 @@ class DuctileFracture(IsotropicJohnsonCook2DModel):
         self.crack_driven_force = dfx.fem.Function(self.DS, name="Crack driven force")
 
         self.elastic_strain_energy_positive = dfx.fem.Function(
-            self.S, name="Elastic strain energy positive"
+            self.DS, name="Elastic strain energy positive"
         )
-        self.plastic_work = dfx.fem.Function(self.S, name="Plastic work")
-        self.plastic_work_old = dfx.fem.Function(self.S)
-        self.plastic_work_inc = dfx.fem.Function(self.S)
+        self.plastic_work = dfx.fem.Function(self.DS, name="Plastic work")
+        self.plastic_work_old = dfx.fem.Function(self.DS)
+        self.plastic_work_inc = dfx.fem.Function(self.DS)
 
         self.elastic_strain_vector_old.x.array[:] = 0.0
         self.crack_driven_force.x.array[:] = 0.0
@@ -279,19 +279,6 @@ class DuctileFracture(IsotropicJohnsonCook2DModel):
             3 * self._material.shear_modulus + self.hardening
         )
 
-        n_elas = (
-            deviatoric_stress
-            / equivalent_stress
-            * Util.macaulayBracket(elastic_factor)
-            / elastic_factor
-        )
-        beta = (
-            3
-            * self._material.shear_modulus
-            * equivalent_plastic_strain_inc
-            / equivalent_stress
-        )
-
         yield_new = self.yield_stress + self.hardening * equivalent_plastic_strain_inc
         # f = yield_new / (
         #     yield_new + 3 * self._material.shear_modulus * equivalent_plastic_strain_inc
@@ -313,7 +300,7 @@ class DuctileFracture(IsotropicJohnsonCook2DModel):
             + strain_inc
             - plastic_strain_inc
         )
-        stress = self._getElasticStressWithFracture(elastic_strain)
+        stress = self.getElasticStressWithFracture(elastic_strain)
 
         plastic_work_inc = (
             0.5 * (self.yield_stress + yield_new) * equivalent_plastic_strain_inc
@@ -323,17 +310,15 @@ class DuctileFracture(IsotropicJohnsonCook2DModel):
             # for they participate in the calculation of the tangent modulus
             # which is main constitutive relation in the next iteration
             ufl.as_vector([stress[0, 0], stress[1, 1], stress[2, 2], stress[0, 1]]),
-            ufl.as_vector([n_elas[0, 0], n_elas[1, 1], n_elas[2, 2], n_elas[0, 1]]),
-            beta,
             # Values to be updated in the next increment not in the next iteration
-            ufl.as_vector(
-                [
-                    elastic_strain[0, 0],
-                    elastic_strain[1, 1],
-                    elastic_strain[2, 2],
-                    elastic_strain[0, 1],
-                ]
-            ),
+            # ufl.as_vector(
+            #     [
+            #         elastic_strain[0, 0],
+            #         elastic_strain[1, 1],
+            #         elastic_strain[2, 2],
+            #         elastic_strain[0, 1],
+            #     ]
+            # ),
             equivalent_plastic_strain_inc,
             plastic_work_inc,
         )
@@ -344,7 +329,7 @@ class DuctileFracture(IsotropicJohnsonCook2DModel):
     def getHardening(self):
         return (1 - self._crack_phase) ** 2 * super().getHardening()
 
-    def _getElasticStressWithFracture(self, strain):
+    def getElasticStressWithFracture(self, strain):
         c = self._material.lame + 2 / 3 * self._material.shear_modulus
         tr_strain_positive = Util.macaulayBracket(ufl.tr(strain))
         tr_strain_negative = ufl.tr(strain) - tr_strain_positive
@@ -405,18 +390,49 @@ class DuctileFracturePrincipleStrainDecomposition(DuctileFracture):
         self.__stress = dfx.fem.Function(self.__WW)
         self.__elastic_strain_energy_positive = dfx.fem.Function(self.S)
 
-    def _updatePrincipleStrain(self, strain):
-        # self.__strain.interpolate(
-        #     dfx.fem.Expression(strain, self.__WW.element.interpolation_points())
-        # )
-        Util.localProject(strain, self.__strain)
-        strain = np.reshape(self.__strain.x.array, (-1, 3, 3))
-        for idx, _strain in enumerate(strain):
-            w, v = np.linalg.eig(_strain)
-            self.principle_strain[idx] = w
-            self.principle_strain_direction[idx] = v
+        __VV = dfx.fem.functionspace(
+            self._mesh, (self._element_type, self._degree, (3,))
+        )
+        self._principle_strain_vis = dfx.fem.Function(__VV, name="Principle strain")
 
-    def _getElasticStressWithFracture(self, strain):
+    def _updatePrincipleStrain(self, strain):
+        # Util.localProject(strain, self.__strain)
+        # # self.__strain.interpolate(
+        # #     dfx.fem.Expression(strain, self.__WW.element.interpolation_points())
+        # # )
+        # strain = np.reshape(self.__strain.x.array, (-1, 3, 3))
+        # for idx, _strain in enumerate(strain):
+        #     w, v = np.linalg.eig(_strain)
+        #     self.principle_strain[idx] = w
+        #     self.principle_strain_direction[idx] = v
+
+        strain_vector = ufl.as_vector(
+            [
+                strain[0, 0],
+                strain[1, 1],
+                strain[2, 2],
+                strain[0, 1],
+            ]
+        )
+        Util.localProject(strain_vector, self.elastic_strain_vector)
+        # self.elastic_strain_vector.interpolate(
+        #     dfx.fem.Expression(strain_vector, self.W.element.interpolation_points())
+        # )
+
+        E = self.elastic_strain_vector.x.array.reshape(-1, 4)
+        for i in range(self._nodes_num):
+            e = np.array(
+                [
+                    [E[i][0], E[i][3], 0.0],
+                    [E[i][3], E[i][1], 0.0],
+                    [0.0, 0.0, E[i][2]],
+                ]
+            )
+            w, v = np.linalg.eig(e)
+            self.principle_strain[i] = w
+            self.principle_strain_direction[i] = v
+
+    def getElasticStressWithFracture(self, strain):
         self._updatePrincipleStrain(strain)
 
         trace = np.sum(self.principle_strain, axis=1)
