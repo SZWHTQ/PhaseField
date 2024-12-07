@@ -258,6 +258,20 @@ class DuctileFracture(IsotropicJohnsonCook2DModel):
         self.crack_driven_force.x.array[:] = 0.0
         self.plastic_work_old.x.array[:] = 0.0
 
+    # def getStrain(self, displacement):
+    #     deformation_gradient = ufl.Identity(self._tdim) + ufl.grad(displacement)
+    #     green_lagrange_strain = 0.5 * (
+    #         ufl.dot(ufl.transpose(deformation_gradient), deformation_gradient)
+    #         - ufl.Identity(self._tdim)
+    #     )
+    #     return ufl.as_tensor(
+    #         [
+    #             [green_lagrange_strain[0, 0], green_lagrange_strain[0, 1], 0.0],
+    #             [green_lagrange_strain[1, 0], green_lagrange_strain[1, 1], 0.0],
+    #             [0.0, 0.0, 0.0],
+    #         ]
+    #     )
+
     def stressProjection(self, strain_inc):
         assert isinstance(
             self._material, Material.JohnsonCookMaterial

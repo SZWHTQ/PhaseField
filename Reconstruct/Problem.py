@@ -17,6 +17,17 @@ from pathlib import Path
 
 import shutil
 
+# from memory_profiler import profile
+
+
+# result_dir = Path("result/simple_shear.6/serial")
+# if not result_dir.exists():
+#     result_dir.mkdir(exist_ok=True, parents=True)
+
+# comm = MPI.COMM_WORLD
+# rank = comm.Get_rank()
+# host = 0
+
 
 class PlaneStrainProblem:
     def __init__(
@@ -80,9 +91,15 @@ class PlaneStrainProblem:
         self._solver = PETSc.KSP().create(self._comm)
         self._solver.setOperators(self._A)
 
-        self._solver.setType(PETSc.KSP.Type.PREONLY)
+        ### Memory leak here, #TODO: Fix this in the future
+        # self._solver.setType(PETSc.KSP.Type.PREONLY)
+        # pc = self._solver.getPC()
+        # pc.setType(PETSc.PC.Type.LU)
+        
+        self._solver.setType(PETSc.KSP.Type.MINRES)
         pc = self._solver.getPC()
-        pc.setType(PETSc.PC.Type.LU)
+        pc.setType(PETSc.PC.Type.HYPRE)
+        pc.setHYPREType("boomeramg")
 
 
 class DisplacementProblem(PlaneStrainProblem):
@@ -156,6 +173,7 @@ class IsotropicPlasticProblem(DisplacementProblem):
 
         self.u = ufl.TrialFunction(self.V)
         self.v = ufl.TestFunction(self.V)
+        # self.u = self.displacement_inc
 
         con = self._constitutive
 
@@ -696,6 +714,7 @@ class DuctileFractureProblem(PlaneStrainProblem):
         self.isotropic_plastic_problem.assemble()
         self.ductile_fracture_sub_problem.assemble()
 
+    # @profile(stream=open(result_dir / f"memory/solve_{rank}.txt", "w"))
     def solve(self):
         con = self._constitutive
         assert isinstance(
@@ -1019,8 +1038,15 @@ class DuctileFractureProblem(PlaneStrainProblem):
         self.ductile_fracture_sub_problem.crack_phase_old.x.array[:] = (
             self.ductile_fracture_sub_problem.crack_phase.x.array[:]
         )
+        
+        self._post_solve()
 
         return num_iteration
+
+    def _post_solve(self):
+        import gc
+
+        gc.collect()
 
     def write(self, time: float = 0):
         con = self._constitutive

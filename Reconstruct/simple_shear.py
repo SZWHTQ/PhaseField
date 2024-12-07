@@ -21,12 +21,9 @@ result_dir = Path("result/simple_shear/mpi")
 if not result_dir.exists():
     result_dir.mkdir(exist_ok=True, parents=True)
 
-is_profiling_enabled = False
-
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 host = 0
-
 
 Ti6Al4V = Material.DuctileFractureMaterial(
     mass_density=4.43e-9,
@@ -137,8 +134,8 @@ if rank == host:
 
     #     gmsh.model.mesh.generate(3)
 
-    # gmsh.write("mesh.inp")
-    gmsh.write("mesh.msh")
+    # gmsh.write((result_dir / "mesh.inp").as_posix())
+    gmsh.write((result_dir / "mesh.msh").as_posix())
 
     # gmsh.fltk.run()
 
@@ -204,7 +201,7 @@ problem.result_dir = result_dir
 problem.result_filename = "ductile_fracture"
 problem.isotropic_plastic_problem.max_iterations = 100
 problem.isotropic_plastic_problem.tolerance = 1e-5
-problem.isotropic_plastic_problem.iteration_out = True
+problem.isotropic_plastic_problem.iteration_out = False
 problem.prepare()
 
 increment_num = 200
