@@ -8,6 +8,8 @@ from mpi4py import MPI
 
 import numpy as np
 
+import time
+
 
 def macaulayBracket(x):
     return (x + abs(x)) / 2
@@ -60,10 +62,14 @@ def localProject(
         a=a,
         L=L,
         u=u,
+        # petsc_options={
+        #     "ksp_type": "preonly",
+        #     "pc_type": "lu",
+        #     "pc_factor_mat_solver_type": "mumps",
+        # },
         petsc_options={
-            "ksp_type": "preonly",
-            "pc_type": "lu",
-            "pc_factor_mat_solver_type": "mumps",
+            "ksp_type": "minres",
+            "pc_type": "hypre",
         },
     )
 
@@ -144,3 +150,52 @@ def getL2Norm(
     norm = np.sqrt(comm.allreduce(dfx.fem.assemble_scalar(L2_2), op=MPI.SUM))
 
     return norm
+
+
+class Timer:
+    def __init__(self, name="Timer"):
+        self.name = name
+        self.start = time.time()
+
+    def elapsed(self):
+        return time.time() - self.start
+
+    def reset(self):
+        self.start = time.time()
+
+    def __str__(self):
+        elapsed = self.elapsed()
+        if elapsed < 0:
+            return "Negative time"
+        elif elapsed < 1:
+            return f"{elapsed:.2e}s"
+        elif elapsed < 60:
+            return f"{elapsed:.2f}s"
+        elif elapsed < 3600:
+            minutes = int(elapsed // 60)
+            seconds = elapsed % 60
+            return f"{minutes:d}m{seconds:.2f}s"
+        elif elapsed < 86400:
+            hours = int(elapsed // 3600)
+            minutes = int((elapsed % 3600) // 60)
+            seconds = elapsed % 60
+            return f"{hours:d}h{minutes:d}m{seconds:.2f}s"
+        else:
+            days = int(elapsed // 86400)
+            hours = int((elapsed % 86400) // 3600)
+            minutes = int((elapsed % 3600) // 60)
+            seconds = elapsed % 60
+            return f"{days:d}d{hours:d}h{minutes:d}m{seconds:.2f}s"
+
+    def pause(self):
+        self.pause_time = time.time()
+
+    def resume(self):
+        if hasattr(self, "pause_time"):
+            self.start += time.time() - self.pause_time
+        else:
+            print("Timer was not paused")
+
+
+def getTimeStr():
+    return time.strftime("[%Y-%m-%d %H:%M:%S]: ", time.localtime())

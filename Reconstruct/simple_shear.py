@@ -13,11 +13,12 @@ import os
 import Material
 import Constitutive
 import Problem
+import Util
 
 
 os.environ["OMP_NUM_THREADS"] = "1"
 
-result_dir = Path("result/simple_shear/mpi")
+result_dir = Path("result/simple_shear/mpi_2")
 if not result_dir.exists():
     result_dir.mkdir(exist_ok=True, parents=True)
 
@@ -206,15 +207,18 @@ problem.prepare()
 
 increment_num = 200
 delta_t = end_time / increment_num
-load_steps = np.arange(delta_t, end_time + delta_t / 2, delta_t)[
-    0 : int(increment_num / 2)
-]
+load_steps = np.arange(
+    delta_t, end_time + delta_t / 2, delta_t
+)  # [0 : int(increment_num / 2)]
 
 if rank == host:
-    progress = tqdm.autonotebook.tqdm(total=load_steps.size)
+    progress = tqdm.tqdm(total=load_steps.size, unit="inc")
 
+timer = Util.Timer("Solve")
 t_old = 0.0
 load_old = 0.0
+if rank == host:
+    total_its = 0
 for i, t in enumerate(load_steps):
     dt.value = t - t_old
     t_old = t
@@ -232,5 +236,9 @@ for i, t in enumerate(load_steps):
     problem.write(t)
 
     if rank == host:
+        total_its += num_it
         progress.update(1)
         progress.set_description(f"{L=:.3e} solved {num_it} its")
+
+if rank == host:
+    print(f"Solve completed in {total_its} iterations, elapsed {timer}")

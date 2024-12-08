@@ -8,6 +8,7 @@ from petsc4py import PETSc
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+import tqdm
 
 import Material
 import Constitutive
@@ -95,7 +96,7 @@ class PlaneStrainProblem:
         # self._solver.setType(PETSc.KSP.Type.PREONLY)
         # pc = self._solver.getPC()
         # pc.setType(PETSc.PC.Type.LU)
-        
+
         self._solver.setType(PETSc.KSP.Type.MINRES)
         pc = self._solver.getPC()
         pc.setType(PETSc.PC.Type.HYPRE)
@@ -580,10 +581,14 @@ class DuctileFractureSubProblem(PlaneStrainProblem):
             L=dfx.fem.form(ufl.rhs(self.F)),
             bcs=self._bcs,
             u=self.crack_phase,
+            # petsc_options={
+            #     "ksp_type": "preonly",
+            #     "pc_type": "lu",
+            #     "pc_factor_mat_solver_type": "mumps",
+            # },
             petsc_options={
-                "ksp_type": "preonly",
-                "pc_type": "lu",
-                "pc_factor_mat_solver_type": "mumps",
+                "ksp_type": "minres",
+                "pc_type": "hypre",
             },
         )
 
@@ -706,6 +711,14 @@ class DuctileFractureProblem(PlaneStrainProblem):
                 self.result_dir / self.isotropic_plastic_problem.log_filename, "w"
             )
 
+            self._convergence_progress_bar = tqdm.tqdm(
+                total=100,
+                # desc="Convergence",
+                position=0,
+                leave=True,
+                bar_format="{desc}{percentage:3.0f}%|{bar}| [{elapsed}<{remaining}, {postfix}]",
+            )
+
         # self.ductile_fracture_sub_problem.result_dir = self.result_dir
 
         # self.ductile_fracture_sub_problem.prepare()
@@ -742,7 +755,13 @@ class DuctileFractureProblem(PlaneStrainProblem):
             iteration_result.write_mesh(self._mesh)
 
         if rank == host:
-            self.log_file.write(f"Increment {pp._solve_call_time}, time {pp._time}\n")
+            inc_info = (
+                Util.getTimeStr()
+                + f"Increment {pp._solve_call_time}, time {pp._time:.3e}"
+            )
+            if pp.verbose:
+                print(inc_info)
+            self.log_file.write(inc_info + "\n")
             if pp.convergence_plot:
                 correction_norm_history = []
                 fig, ax = plt.subplots()
@@ -755,7 +774,18 @@ class DuctileFractureProblem(PlaneStrainProblem):
                 # Use Agg backend for non-interactive plotting
                 canvas = FigureCanvas(fig)
 
+            self._convergence_progress_bar.reset()
+            self._convergence_progress_bar.set_description(
+                f"Increment {pp._solve_call_time}"
+            )
+            # self._convergence_progress_bar.bar_format =
+
+            timer = Util.Timer()
+            total_timer = Util.Timer()
+
         while (not converged) and num_iteration < pp.max_iterations:
+            if rank == host:
+                timer.reset()
             # Util.localProject(
             #     con.getYieldStress(),
             #     con.yield_stress,
@@ -926,22 +956,30 @@ class DuctileFractureProblem(PlaneStrainProblem):
             # self._comm.Barrier()
             correction_norm_old = correction_norm
             correction_norm = Util.getL2Norm(pp.iteration_correction)
+            correction_norm: float = self._comm.allreduce(correction_norm, op=MPI.MIN)
             converged = correction_norm < pp.tolerance
-            converged = self._comm.allreduce(converged, op=MPI.LAND)
+            # converged = self._comm.allreduce(converged, op=MPI.LAND)
 
             if rank == host:
+                it_time = timer.elapsed()
+
+                it_info = (
+                    Util.getTimeStr()
+                    + f"iteration {num_iteration}: "
+                    + f"r = {correction_norm:.3e}, "
+                    + f"dr = {(correction_norm - correction_norm_old):.3e}, "
+                    + f"elapsed: {it_time:.2f}s"
+                )
                 if pp.verbose:
                     terminal_size = shutil.get_terminal_size()
                     width = terminal_size.columns
                     # print(" " * width, end=self._log_info_line_end_with, flush=True)
                     print(
-                        f"    iteration {num_iteration}: r = {correction_norm:.3e}, dr = {(correction_norm - correction_norm_old):.3e}",
+                        it_info,
                         # end=self._log_info_line_end_with,
                         flush=True,
                     )
-                self.log_file.write(
-                    f"iteration {num_iteration}: r = {correction_norm:.3e}, dr = {(correction_norm - correction_norm_old):.3e}\n"
-                )
+                self.log_file.write(it_info + "\n")
                 self.log_file.flush()
                 if pp.convergence_plot:
                     ax.plot(
@@ -953,11 +991,34 @@ class DuctileFractureProblem(PlaneStrainProblem):
                     canvas.draw()
                     # plt.pause(0.01)
 
+                rate_str = (
+                    f"{it_time:.2f}s/it" if it_time > 1 else f"{1/it_time:.2f}it/s"
+                )
+
+                self._convergence_progress_bar.set_postfix(
+                    {
+                        "\b\b": "\b" + rate_str,
+                        "it": num_iteration,
+                        "res": f"{correction_norm:.3e}",
+                    }
+                )
+                # self._convergence_progress_bar.update(pp.tolerance / correction_norm)
+                n = pp.tolerance / correction_norm * 100 if not converged else 100.0
+                n -= self._convergence_progress_bar.n
+                self._convergence_progress_bar.update(n)
+                # self._convergence_progress_bar.
+
             num_iteration += 1
             self._comm.Barrier()
         else:
             if num_iteration == pp.max_iterations:
                 if rank == host:
+                    info = (
+                        Util.getTimeStr()
+                        + f"iteration {num_iteration}: "
+                        + f"r = {correction_norm:.3e}, "
+                        + f"dr = {(correction_norm - correction_norm_old):.3e}"
+                    )
                     if pp.verbose:
                         terminal_size = shutil.get_terminal_size()
                         width = terminal_size.columns
@@ -966,26 +1027,25 @@ class DuctileFractureProblem(PlaneStrainProblem):
                             end=pp._log_info_line_end_with,
                             flush=True,
                         )
-                        print(
-                            f"   iteration {num_iteration}: r = {correction_norm:.3e}, dr = {(correction_norm - correction_norm_old):.3e}",
-                        )
-                    self.log_file.write(
-                        f"iteration {num_iteration}: r = {correction_norm:.3e}, dr = {(correction_norm - correction_norm_old):.3e}\n"
-                    )
+                        print(info)
+                    self.log_file.write(info + "\n")
                     self.log_file.flush()
                 raise RuntimeError("Failed to converge")
 
         if pp.iteration_out:
             iteration_result.close()
         if rank == host:
+            info = (
+                Util.getTimeStr()
+                + f"Converged at iteration {num_iteration-1}: "
+                # + f"r = {correction_norm:.3e}, "
+                + f"elapsed: {total_timer}, "
+                + f"rate: {num_iteration / total_timer.elapsed():.2f}it/s\n"
+            )
             if pp.verbose:
                 # print(" " * width, end=self._log_info_line_end_with, flush=True)
-                print(
-                    f"  Converged at iteration {num_iteration-1}: r = {correction_norm:.3e}"
-                )
-            self.log_file.write(
-                f"Converged at iteration {num_iteration-1}: r = {correction_norm:.3e}\n\n"
-            )
+                print(info)
+            self.log_file.write(info + "\n")
             self.log_file.flush()
 
         if pp.convergence_plot:
@@ -1038,17 +1098,17 @@ class DuctileFractureProblem(PlaneStrainProblem):
         self.ductile_fracture_sub_problem.crack_phase_old.x.array[:] = (
             self.ductile_fracture_sub_problem.crack_phase.x.array[:]
         )
-        
-        self._post_solve()
+
+        # self._post_solve()
 
         return num_iteration
 
-    def _post_solve(self):
-        import gc
+    # def _post_solve(self):
+    #     import gc
 
-        gc.collect()
+    #     gc.collect()
 
-    def write(self, time: float = 0):
+    def write(self, t: float = 0):
         con = self._constitutive
         assert isinstance(
             con, Constitutive.DuctileFracturePrincipleStrainDecomposition
@@ -1094,7 +1154,7 @@ class DuctileFractureProblem(PlaneStrainProblem):
 
         con._principle_strain_vis.x.array[:] = con.principle_strain.flatten()
 
-        self.result_file.write(time)
+        self.result_file.write(t)
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.result_file.close()
