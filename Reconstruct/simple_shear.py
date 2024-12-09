@@ -207,9 +207,9 @@ problem.prepare()
 
 increment_num = 200
 delta_t = end_time / increment_num
-load_steps = np.arange(
-    delta_t, end_time + delta_t / 2, delta_t
-)  # [0 : int(increment_num / 2)]
+load_steps = np.arange(delta_t, end_time + delta_t / 2, delta_t)[
+    0:10
+]  # [0 : int(increment_num / 2)]
 
 if rank == host:
     progress = tqdm.tqdm(total=load_steps.size, unit="inc")
@@ -240,5 +240,8 @@ for i, t in enumerate(load_steps):
         progress.update(1)
         progress.set_description(f"{L=:.3e} solved {num_it} its")
 
+del problem
+
 if rank == host:
+    progress.close()
     print(f"Solve completed in {total_its} iterations, elapsed {timer}")

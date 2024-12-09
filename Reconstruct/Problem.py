@@ -1158,3 +1158,6 @@ class DuctileFractureProblem(PlaneStrainProblem):
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.result_file.close()
+
+        if self._mesh.comm.rank == 0:
+            self._convergence_progress_bar.close()
