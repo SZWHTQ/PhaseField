@@ -2,7 +2,7 @@
 ## FEniCSx implementation of a phase field model for ductile fracture
 
 ### Introduction
-This repository contains the implementation of a phase field model for ductile fracture in FEniCSx. The model is based on the work of [Miehe et al. (2010)](https://doi.org/10.1016/j.jmps.2010.06.006), [Ambati et al. (2015)](https://doi.org/10.1016/j.jmps.2015.07.011) and [Q. Zeng et al. (2022)](https://doi.org/10.1016/j.jmps.2022.104914). The model is implemented in Python using the finite element library FEniCSx.
+This repository contains the implementation of a phase field model for ductile fracture in FEniCSx. The model is based on the work of [Miehe et al. (2010)](https://doi.org/10.1016/j.jmps.2010.06.006), [Ambati et al. (2015)](https://doi.org/10.1016/j.jmps.2015.07.011) and [Q. Zeng et al. (2022)](https://doi.org/10.1016/j.jmps.2022.104914). The model is implemented in Python using the finite element library [FEniCSx](https://fenicsproject.org/).
 
 ### Installation
 Please follow the instructions in the [FEniCSx download](https://fenicsproject.org/download/) to install FEniCSx on your system.

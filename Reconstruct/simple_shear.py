@@ -5,7 +5,7 @@ from mpi4py import MPI
 import gmsh
 import numpy as np
 
-import tqdm.autonotebook
+import tqdm
 
 from pathlib import Path
 import os
@@ -18,7 +18,7 @@ import Util
 
 os.environ["OMP_NUM_THREADS"] = "1"
 
-result_dir = Path("result/simple_shear/mpi_2")
+result_dir = Path("result/simple_shear/mpi")
 if not result_dir.exists():
     result_dir.mkdir(exist_ok=True, parents=True)
 
