@@ -20,11 +20,9 @@ import shutil
 
 # from memory_profiler import profile
 
-
-# result_dir = Path("result/simple_shear.6/serial")
+# result_dir = Path("result/simple_shear.memory_test/mpi")
 # if not result_dir.exists():
 #     result_dir.mkdir(exist_ok=True, parents=True)
-
 # comm = MPI.COMM_WORLD
 # rank = comm.Get_rank()
 # host = 0
@@ -101,6 +99,12 @@ class PlaneStrainProblem:
         pc = self._solver.getPC()
         pc.setType(PETSc.PC.Type.HYPRE)
         pc.setHYPREType("boomeramg")
+
+        # self._solver.setType(PETSc.KSP.Type.CG)
+
+        # self._solver.setType(PETSc.KSP.Type.GMRES)
+        # pc = self._solver.getPC()
+        # pc.setType(PETSc.PC.Type.NONE)
 
 
 class DisplacementProblem(PlaneStrainProblem):
@@ -698,6 +702,7 @@ class DuctileFractureProblem(PlaneStrainProblem):
                 self.ductile_fracture_sub_problem._crack_phase_vis,
                 self.ductile_fracture_sub_problem._crack_driven_force_vis,
                 self._constitutive._principle_strain_vis,
+                # self._constitutive.plastic_strain_vector,
             ],
             engine="BP4",
         )
@@ -783,7 +788,12 @@ class DuctileFractureProblem(PlaneStrainProblem):
             timer = Util.Timer()
             total_timer = Util.Timer()
 
-        while (not converged) and num_iteration < pp.max_iterations:
+        # @profile(
+        #     stream=open(
+        #         result_dir / f"memory/it_solve_{pp._solve_call_time}_{rank}.txt", "a"
+        #     )
+        # )
+        def it_solve():
             if rank == host:
                 timer.reset()
             # Util.localProject(
@@ -944,6 +954,9 @@ class DuctileFractureProblem(PlaneStrainProblem):
             con._crack_phase.x.array[:] = (
                 self.ductile_fracture_sub_problem.crack_phase.x.array[:]
             )
+
+        while (not converged) and num_iteration < pp.max_iterations:
+            it_solve()
             if pp.iteration_out:
                 iteration_result.write_function(
                     pp.iteration_correction, t=num_iteration
@@ -1099,14 +1112,19 @@ class DuctileFractureProblem(PlaneStrainProblem):
             self.ductile_fracture_sub_problem.crack_phase.x.array[:]
         )
 
-        # self._post_solve()
+        self._post_solve()
 
         return num_iteration
 
-    # def _post_solve(self):
-    #     import gc
+    def _post_solve(self):
+        import gc
 
-    #     gc.collect()
+        opts = PETSc.Options()
+        opts.clear()
+        opts.destroy()
+        del opts
+
+        gc.collect()
 
     def write(self, t: float = 0):
         con = self._constitutive
