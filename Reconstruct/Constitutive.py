@@ -183,8 +183,13 @@ class IsotropicJohnsonCook2DModel(Constitutive):
         y *= 1 + m.strain_rate_strength_coefficient * ufl.ln(
             ufl.max_value(self.strain_rate / m.reference_strain_rate, 1.0)
         )
-        y *= 1 - (self.temperature - m.reference_temperature) / (
-            m.melting_temperature - m.reference_temperature
+        y *= (
+            1
+            - (
+                (self.temperature - m.reference_temperature)
+                / (m.melting_temperature - m.reference_temperature)
+            )
+            ** m.temperature_exponent
         )
         return y
 
@@ -203,8 +208,13 @@ class IsotropicJohnsonCook2DModel(Constitutive):
         _h *= 1 + m.strain_rate_strength_coefficient * ufl.ln(
             ufl.max_value(self.strain_rate / m.reference_strain_rate, 1.0)
         )
-        _h *= 1 - (self.temperature - m.reference_temperature) / (
-            m.melting_temperature - m.reference_temperature
+        _h *= (
+            1
+            - (
+                (self.temperature - m.reference_temperature)
+                / (m.melting_temperature - m.reference_temperature)
+            )
+            ** m.temperature_exponent
         )
         # h = Util.macaulayBracket(self.equivalent_plastic_strain) * _h
         h = ufl.conditional(ufl.gt(self.equivalent_plastic_strain, 0.0), _h, 0.0)
@@ -243,6 +253,7 @@ class DuctileFracture(IsotropicJohnsonCook2DModel):
 
         self.elastic_strain_vector = dfx.fem.Function(self.W, name="Elastic strain")
         self.elastic_strain_vector_old = dfx.fem.Function(self.W)
+        # self.plastic_strain_vector = dfx.fem.Function(self.W, name="Plastic strain")
 
         self._crack_phase = dfx.fem.Function(self.S)
         self.crack_driven_force = dfx.fem.Function(self.DS, name="Crack driven force")
@@ -308,12 +319,33 @@ class DuctileFracture(IsotropicJohnsonCook2DModel):
             )
             * deviatoric_stress
         )
+        # plastic_strain_inc = ufl.as_matrix(
+        #     [
+        #         [plastic_strain_inc[0, 0], plastic_strain_inc[0, 1], 0.0],
+        #         [plastic_strain_inc[1, 0], plastic_strain_inc[1, 1], 0.0],
+        #         [0.0, 0.0, 0.0],
+        #     ]
+        # )
 
         elastic_strain = (
             self.asTensor3x3(self.elastic_strain_vector_old)
             + strain_inc
             - plastic_strain_inc
         )
+        # self.plastic_strain_vector.interpolate(
+        #     dfx.fem.Expression(
+        #         ufl.as_vector(
+        #             [
+        #                 plastic_strain_inc[0, 0],
+        #                 plastic_strain_inc[1, 1],
+        #                 plastic_strain_inc[2, 2],
+        #                 plastic_strain_inc[0, 1],
+        #             ]
+        #         )
+        #         + self.plastic_strain_vector,
+        #         self.W.element.interpolation_points(),
+        #     )
+        # )
         stress = self.getElasticStressWithFracture(elastic_strain)
 
         plastic_work_inc = (
@@ -325,14 +357,6 @@ class DuctileFracture(IsotropicJohnsonCook2DModel):
             # which is main constitutive relation in the next iteration
             ufl.as_vector([stress[0, 0], stress[1, 1], stress[2, 2], stress[0, 1]]),
             # Values to be updated in the next increment not in the next iteration
-            # ufl.as_vector(
-            #     [
-            #         elastic_strain[0, 0],
-            #         elastic_strain[1, 1],
-            #         elastic_strain[2, 2],
-            #         elastic_strain[0, 1],
-            #     ]
-            # ),
             equivalent_plastic_strain_inc,
             plastic_work_inc,
         )
@@ -400,7 +424,7 @@ class DuctileFracturePrincipleStrainDecomposition(DuctileFracture):
         self.__WW = dfx.fem.functionspace(
             self._mesh, (self._element_type, self._degree, (3, 3))
         )
-        self.__strain = dfx.fem.Function(self.__WW)
+        # self.__strain = dfx.fem.Function(self.__WW)
         self.__stress = dfx.fem.Function(self.__WW)
         self.__elastic_strain_energy_positive = dfx.fem.Function(self.S)
 
@@ -424,7 +448,7 @@ class DuctileFracturePrincipleStrainDecomposition(DuctileFracture):
             [
                 strain[0, 0],
                 strain[1, 1],
-                strain[2, 2],
+                0.0,
                 strain[0, 1],
             ]
         )
