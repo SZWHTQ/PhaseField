@@ -457,18 +457,31 @@ class DuctileFracturePrincipleStrainDecomposition(DuctileFracture):
         #     dfx.fem.Expression(strain_vector, self.W.element.interpolation_points())
         # )
 
-        E = self.elastic_strain_vector.x.array.reshape(-1, 4)
-        for i in range(self._nodes_num):
-            e = np.array(
-                [
-                    [E[i][0], E[i][3], 0.0],
-                    [E[i][3], E[i][1], 0.0],
-                    [0.0, 0.0, E[i][2]],
-                ]
-            )
-            w, v = np.linalg.eig(e)
-            self.principle_strain[i] = w
-            self.principle_strain_direction[i] = v
+        # E = self.elastic_strain_vector.x.array.reshape(-1, 4)
+        # for i in range(self._nodes_num):
+        #     e = np.array(
+        #         [
+        #             [E[i][0], E[i][3], 0.0],
+        #             [E[i][3], E[i][1], 0.0],
+        #             [0.0, 0.0, E[i][2]],
+        #         ]
+        #     )
+        #     w, v = np.linalg.eig(e)
+        #     self.principle_strain[i] = w
+        #     self.principle_strain_direction[i] = v
+
+        Ev = self.elastic_strain_vector.x.array.reshape(-1, 4)
+        Zero = np.zeros(np.shape(Ev)[0])
+        E = np.array(
+            [
+                [Ev[:, 0], Ev[:, 3], Zero],
+                [Ev[:, 3], Ev[:, 1], Zero],
+                [Zero, Zero, Ev[:, 2]],
+            ]
+        ).transpose(2, 1, 0)
+        w, v = np.linalg.eigh(E)
+        self.principle_strain[:] = w
+        self.principle_strain_direction[:] = v
 
     def getElasticStressWithFracture(self, strain):
         self._updatePrincipleStrain(strain)
