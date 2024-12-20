@@ -433,6 +433,8 @@ class DuctileFracturePrincipleStrainDecomposition(DuctileFracture):
         )
         self._principle_strain_vis = dfx.fem.Function(__VV, name="Principle strain")
 
+        self.__E = np.zeros((self._nodes_num, 3, 3))
+
     def _updatePrincipleStrain(self, strain):
         # Util.localProject(strain, self.__strain)
         # # self.__strain.interpolate(
@@ -470,18 +472,25 @@ class DuctileFracturePrincipleStrainDecomposition(DuctileFracture):
         #     self.principle_strain[i] = w
         #     self.principle_strain_direction[i] = v
 
-        Ev = self.elastic_strain_vector.x.array.reshape(-1, 4)
-        Zero = np.zeros(np.shape(Ev)[0])
-        E = np.array(
-            [
-                [Ev[:, 0], Ev[:, 3], Zero],
-                [Ev[:, 3], Ev[:, 1], Zero],
-                [Zero, Zero, Ev[:, 2]],
-            ]
-        ).transpose(2, 1, 0)
-        w, v = np.linalg.eigh(E)
-        self.principle_strain[:] = w
-        self.principle_strain_direction[:] = v
+        # Ev = self.elastic_strain_vector.x.array.reshape(-1, 4)
+        # Zero = np.zeros(np.shape(Ev)[0])
+        # E = np.array(
+        #     [
+        #         [Ev[:, 0], Ev[:, 3], Zero],
+        #         [Ev[:, 3], Ev[:, 1], Zero],
+        #         [Zero, Zero, Ev[:, 2]],
+        #     ]
+        # ).transpose(2, 1, 0)
+        # self.principle_strain[:], self.principle_strain_direction[:] = np.linalg.eigh(E)
+
+        self.__E[:, 0, 0] = self.elastic_strain_vector.x.array[0::4]
+        self.__E[:, 0, 1] = self.elastic_strain_vector.x.array[3::4]
+        self.__E[:, 1, 0] = self.elastic_strain_vector.x.array[3::4]
+        self.__E[:, 1, 1] = self.elastic_strain_vector.x.array[1::4]
+        self.__E[:, 2, 2] = self.elastic_strain_vector.x.array[2::4]
+        self.principle_strain[:], self.principle_strain_direction[:] = np.linalg.eigh(
+            self.__E
+        )
 
     def getElasticStressWithFracture(self, strain):
         self._updatePrincipleStrain(strain)
