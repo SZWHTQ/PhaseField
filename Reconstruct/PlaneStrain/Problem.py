@@ -11,7 +11,7 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 import tqdm
 
 import Material
-import Constitutive
+from PlaneStrain import Constitutive
 import Util
 
 from pathlib import Path
@@ -28,7 +28,7 @@ import shutil
 # host = 0
 
 
-class PlaneStrainProblem:
+class Problem:
     def __init__(
         self,
         mesh: dfx.mesh.Mesh,
@@ -107,7 +107,7 @@ class PlaneStrainProblem:
         # pc.setType(PETSc.PC.Type.NONE)
 
 
-class DisplacementProblem(PlaneStrainProblem):
+class PlaneStrainProblem(Problem):
     def __init__(
         self,
         constitutive: Constitutive.Constitutive,
@@ -135,10 +135,10 @@ class DisplacementProblem(PlaneStrainProblem):
         self._displacement_vis = dfx.fem.Function(self._V_vis, name="Displacement")
 
 
-class IsotropicPlasticProblem(DisplacementProblem):
+class IsotropicPlasticProblem(PlaneStrainProblem):
     def __init__(
         self,
-        constitutive: Constitutive.IsotropicJohnsonCook2DModel,
+        constitutive: Constitutive.IsotropicJohnsonCook,
         dt: dfx.fem.Constant,
         element_type: str = "Lagrange",
         degree: int = 1,
@@ -155,9 +155,7 @@ class IsotropicPlasticProblem(DisplacementProblem):
         self.dt = dt
 
         assert issubclass(type(self._material), Material.JohnsonCookMaterial)
-        assert issubclass(
-            type(self._constitutive), Constitutive.IsotropicJohnsonCook2DModel
-        )
+        assert issubclass(type(self._constitutive), Constitutive.IsotropicJohnsonCook)
 
         self.displacement_inc = dfx.fem.Function(self.V, name="Displacement increment")
         self.iteration_correction = dfx.fem.Function(
@@ -194,7 +192,7 @@ class IsotropicPlasticProblem(DisplacementProblem):
         self.F += (
             ufl.inner(
                 con.getStrain(self.v),
-                con._getElasticStress(con.getStrain(self.u)),
+                con.getElasticStress(con.getStrain(self.u)),
             )
             * self.dx
         )
@@ -270,7 +268,7 @@ class IsotropicPlasticProblem(DisplacementProblem):
             self.log_file = open(self.result_dir / self.log_filename, "w")
 
     def solve(self):
-        con: Constitutive.IsotropicJohnsonCook2DModel = self._constitutive
+        con: Constitutive.IsotropicJohnsonCook = self._constitutive
 
         num_iteration = 0
         correction_norm = 0
@@ -465,7 +463,7 @@ class IsotropicPlasticProblem(DisplacementProblem):
         self.result_file.close()
 
 
-class DuctileFractureSubProblem(PlaneStrainProblem):
+class DuctileFractureSubProblem(Problem):
     def __init__(
         self,
         # material: Material.DuctileFractureMaterial,
@@ -639,7 +637,7 @@ class DuctileFractureSubProblem(PlaneStrainProblem):
         self.result_file.close()
 
 
-class DuctileFractureProblem(PlaneStrainProblem):
+class DuctileFractureProblem(Problem):
     def __init__(
         self,
         constitutive: Constitutive.DuctileFracture,
@@ -680,30 +678,35 @@ class DuctileFractureProblem(PlaneStrainProblem):
 
     def prepare(self):
         super().prepare()
-        assert isinstance(
+        # assert isinstance(
+        #     self._constitutive, Constitutive.DuctileFracturePrincipleStrainDecomposition
+        # )
+        function_list = [
+            self.isotropic_plastic_problem._displacement_vis,
+            self.isotropic_plastic_problem._equivalent_plastic_strain_vis,
+            self.isotropic_plastic_problem._stress_vector_vis,
+            self.isotropic_plastic_problem._equivalent_stress_vis,
+            self.isotropic_plastic_problem._yield_stress,
+            self.isotropic_plastic_problem._hardening,
+            self.isotropic_plastic_problem._elastic_strain_vis,
+            self.isotropic_plastic_problem._elastic_strain_energy_positive_vis,
+            self.isotropic_plastic_problem._plastic_work_vis,
+            self.isotropic_plastic_problem._acceleration_vis,
+            self.isotropic_plastic_problem._velocity_vis,
+            self.ductile_fracture_sub_problem._crack_phase_vis,
+            self.ductile_fracture_sub_problem._crack_driven_force_vis,
+            # self._constitutive._principle_strain_vis,
+            # self._constitutive.plastic_strain_vector,
+        ]
+        if isinstance(
             self._constitutive, Constitutive.DuctileFracturePrincipleStrainDecomposition
-        )
+        ):
+            function_list.append(self._constitutive._principle_strain_vis)
 
         self.result_file = dfx.io.VTXWriter(
             self._comm,
             self.result_dir / (self.result_filename + ".bp"),
-            [
-                self.isotropic_plastic_problem._displacement_vis,
-                self.isotropic_plastic_problem._equivalent_plastic_strain_vis,
-                self.isotropic_plastic_problem._stress_vector_vis,
-                self.isotropic_plastic_problem._equivalent_stress_vis,
-                self.isotropic_plastic_problem._yield_stress,
-                self.isotropic_plastic_problem._hardening,
-                self.isotropic_plastic_problem._elastic_strain_vis,
-                self.isotropic_plastic_problem._elastic_strain_energy_positive_vis,
-                self.isotropic_plastic_problem._plastic_work_vis,
-                self.isotropic_plastic_problem._acceleration_vis,
-                self.isotropic_plastic_problem._velocity_vis,
-                self.ductile_fracture_sub_problem._crack_phase_vis,
-                self.ductile_fracture_sub_problem._crack_driven_force_vis,
-                self._constitutive._principle_strain_vis,
-                # self._constitutive.plastic_strain_vector,
-            ],
+            function_list,
             engine="BP4",
         )
         self.result_file.write(0)
@@ -1128,11 +1131,11 @@ class DuctileFractureProblem(PlaneStrainProblem):
 
     def write(self, t: float = 0):
         con = self._constitutive
-        assert isinstance(
-            con, Constitutive.DuctileFracturePrincipleStrainDecomposition
-        ), (
-            "Constitutive is not DuctileFracturePrincipleStrainDecomposition"
-        )  # Type check just for syntax highlighting and autocompletion
+        # assert isinstance(
+        #     con, Constitutive.DuctileFracturePrincipleStrainDecomposition
+        # ), (
+        #     "Constitutive is not DuctileFracturePrincipleStrainDecomposition"
+        # )  # Type check just for syntax highlighting and autocompletion
         self.isotropic_plastic_problem._displacement_vis.interpolate(
             self.isotropic_plastic_problem.displacement
         )
@@ -1170,7 +1173,8 @@ class DuctileFractureProblem(PlaneStrainProblem):
             con.crack_driven_force
         )
 
-        con._principle_strain_vis.x.array[:] = con.principle_strain.flatten()
+        if isinstance(con, Constitutive.DuctileFracturePrincipleStrainDecomposition):
+            con._principle_strain_vis.x.array[:] = con.principle_strain.flatten()
 
         self.result_file.write(t)
 
