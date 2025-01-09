@@ -98,7 +98,7 @@ def thick_cylinder():
     gmsh.finalize()
 
     # %% Create the constitutive model
-    constitutive = Constitutive.IsotropicJohnsonCook2DModel(material, mesh)
+    constitutive = Constitutive.IsotropicJohnsonCook(material, mesh)
 
     # %% Create the problem
     metadata = {"quadrature_degree": 2, "quadrature_scheme": "default"}

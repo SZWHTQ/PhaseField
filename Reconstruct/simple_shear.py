@@ -11,14 +11,14 @@ from pathlib import Path
 import os
 
 import Material
-import Constitutive
-import Problem
+from Solid import Constitutive
+from Solid import Problem
 import Util
 
 
 os.environ["OMP_NUM_THREADS"] = "1"
 
-result_dir = Path("result/simple_shear/mpi")
+result_dir = Path("result/simple_shear.nonlinear_geometry/mpi")
 if not result_dir.exists():
     result_dir.mkdir(exist_ok=True, parents=True)
 
@@ -26,9 +26,11 @@ comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 host = 0
 
-# Util.getLamesParameters
+dim = 2
+
 E, nu = 1.1e5, 0.31
 lame, mu = Util.getLamesParameters(E, nu)  # (68501.40618722378, 41984.732824427476)
+thickness = 1.0
 
 Ti6Al4V = Material.DuctileFractureMaterial(
     mass_density=4.43e-9,
@@ -55,7 +57,12 @@ mesh_x = int(4 * w / Ti6Al4V.fracture_characteristic_length)
 
 gmsh.initialize()
 if rank == host:
-    mesh_file = "./result/mesh/simple_shear.msh"
+    if dim == 2:
+        mesh_file = "./result/mesh/simple_shear.msh"
+    elif dim == 3:
+        mesh_file = "./result/mesh/simple_shear_3d.msh"
+    else:
+        raise ValueError("Invalid dimension")
     if Path(mesh_file).exists():
         gmsh.open(mesh_file)
     else:
@@ -135,20 +142,20 @@ if rank == host:
 
         gmsh.model.mesh.optimize("Netgen")
 
-        # if preset.dim == 3:
-        #     gmsh.model.occ.extrude([(2, 1)], 0, 0, preset.thickness, [1], recombine=True)
-        #     gmsh.model.occ.synchronize()
+        if dim == 3:
+            gmsh.model.occ.extrude([(2, 1)], 0, 0, thickness, [1], recombine=True)
+            gmsh.model.occ.synchronize()
 
-        #     gmsh.model.addPhysicalGroup(3, [1], 1, "Model")
+            gmsh.model.addPhysicalGroup(3, [1], 1, "Model")
 
-        #     gmsh.model.mesh.generate(3)
+            gmsh.model.mesh.generate(3)
 
         # gmsh.write((result_dir / "mesh.inp").as_posix())
         gmsh.write((result_dir / "mesh.msh").as_posix())
 
     # gmsh.fltk.run()
 
-mesh, _, _ = dfx.io.gmshio.model_to_mesh(gmsh.model, comm, host, gdim=2)
+mesh, _, _ = dfx.io.gmshio.model_to_mesh(gmsh.model, comm, host, gdim=dim)
 gmsh.finalize()
 
 
@@ -208,7 +215,7 @@ def getLoad(t):
 
 problem.result_dir = result_dir
 problem.result_filename = "ductile_fracture"
-problem.isotropic_plastic_problem.max_iterations = 100
+problem.isotropic_plastic_problem.max_iterations = 500
 problem.isotropic_plastic_problem.tolerance = 1e-5
 problem.isotropic_plastic_problem.iteration_out = False
 problem.prepare()
